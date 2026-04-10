@@ -24,7 +24,7 @@ yarn-error.log*
 .env.*.local
 
 # 데이터 (대용량 또는 민감 데이터)
-data/*.json
+data/*
 
 # OS
 .DS_Store
