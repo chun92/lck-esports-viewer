@@ -1,0 +1,12 @@
+{
+    "paths": {
+        "raw_data": {
+            "data_directory": "data/raw",
+            "players": "players.csv",
+            "tenures": "tenures.csv",
+            "roster_changes": "roster_changes.csv",
+            "player_redirects": "player_redirects.csv",
+            "teams": "teams.csv"
+        }
+    }
+}

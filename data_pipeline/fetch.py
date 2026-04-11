@@ -2,6 +2,7 @@ from mwrogue.esports_client import EsportsClient # type: ignore
 from mwrogue.auth_credentials import AuthCredentials # type: ignore
 import csv
 import time
+from paths import get_raw_file_path
 
 credentials = AuthCredentials(user_file="me")
 site = EsportsClient('lol', credentials=credentials)
@@ -113,26 +114,25 @@ def save_csv(data, file_path):
         writer.writerows(data)
 
 
-player_csv_file_path = "../data/raw/players.csv"
-tenure_csv_file_path = "../data/raw/tenures.csv"
-roster_change_csv_file_path = "../data/raw/roster_changes.csv"
-player_redirect_csv_file_path = "../data/raw/player_redirects.csv"
-team_csv_file_path = "../data/raw/teams.csv"
-
-
 if __name__ == "__main__":
+    raw_players_file_path = get_raw_file_path("players")
+    raw_tenures_file_path = get_raw_file_path("tenures")
+    raw_roster_changes_file_path = get_raw_file_path("roster_changes")
+    raw_player_redirects_file_path = get_raw_file_path("player_redirects")
+    raw_teams_file_path = get_raw_file_path("teams")
+
     country = "South Korea"
     players = fetch_players(country)
-    save_csv(players, player_csv_file_path)
+    save_csv(players, raw_players_file_path)
 
     tenures = fetch_tenures(country)
-    save_csv(tenures, tenure_csv_file_path)
+    save_csv(tenures, raw_tenures_file_path)
 
     roster_changes = fetch_roster_changes(country)
-    save_csv(roster_changes, roster_change_csv_file_path)
+    save_csv(roster_changes, raw_roster_changes_file_path)
 
     player_redirects = fetch_player_redirects()
-    save_csv(player_redirects, player_redirect_csv_file_path)
+    save_csv(player_redirects, raw_player_redirects_file_path)
 
     teams = fetch_teams()
-    save_csv(teams, team_csv_file_path)
+    save_csv(teams, raw_teams_file_path)
