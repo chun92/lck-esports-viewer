@@ -24,12 +24,12 @@ def fetch_with_retry(query_fn, retries=5, backoff=60):
     raise Exception("All attempts failed")
 
 
-def fetch_with_offset(query_fn, table_name, country=None):
+def fetch_with_offset(query_fn, table_name):
     all_results = []
     offset = 0
     limit = 500  # 한 번에 가져올 레코드 수
     
-    print(f"Fetching {table_name} for country: {country if country else 'All'}...")
+    print(f"Fetching {table_name}...")
     while True:
         print(f"Fetching {table_name} with offset {offset}...")
         batch = fetch_with_retry(lambda: query_fn(offset, limit))
@@ -44,7 +44,9 @@ def fetch_with_offset(query_fn, table_name, country=None):
     return all_results
 
 
-def fetch_players(country=None):
+def fetch_players(filters=None):
+    filters = filters or {}
+    country = filters.get("country")
     where_clause = f'Country="{country}"' if country else None
     batch_query_fn = lambda offset, limit: site.cargo_client.query(
         tables="Players",
@@ -53,11 +55,20 @@ def fetch_players(country=None):
         limit=limit,
         offset=offset
     )
-    return fetch_with_offset(batch_query_fn, "players", country)
+    return fetch_with_offset(batch_query_fn, "players")
 
 
-def fetch_tenures(country=None):
-    where_clause = f'P.Country="{country}"' if country else None
+def fetch_tenures(filters=None):
+    filters = filters or {}
+    country = filters.get("country")
+    since_date = filters.get("since_date")
+    conditions = []
+    if country:
+        conditions.append(f'P.Country="{country}"')
+    if since_date:
+        conditions.append(f'T.DateJoin>="{since_date}"')
+    where_clause = " AND ".join(conditions) if conditions else None
+
     batch_query_fn = lambda offset, limit: site.cargo_client.query(
         tables="Tenures=T, Players=P",
         join_on="T.Player=P.Player",
@@ -66,11 +77,20 @@ def fetch_tenures(country=None):
         limit=limit,
         offset=offset
     )
-    return fetch_with_offset(batch_query_fn, "tenures", country)
+    return fetch_with_offset(batch_query_fn, "tenures")
 
 
-def fetch_roster_changes(country=None):
-    where_clause = f'P.Country="{country}"' if country else None
+def fetch_roster_changes(filters=None):
+    filters = filters or {}
+    country = filters.get("country")
+    since_date = filters.get("since_date")
+    conditions = []
+    if country:
+        conditions.append(f'P.Country="{country}"')
+    if since_date:
+        conditions.append(f'R.Date_Sort>="{since_date}"')
+    where_clause = " AND ".join(conditions) if conditions else None
+    
     batch_query_fn = lambda offset, limit: site.cargo_client.query(
         tables="RosterChanges=R, Players=P",
         join_on="R.Player=P.Player",
@@ -79,11 +99,14 @@ def fetch_roster_changes(country=None):
         limit=limit,
         offset=offset
     )
-    return fetch_with_offset(batch_query_fn, "roster changes", country)
+    return fetch_with_offset(batch_query_fn, "roster changes")
 
 
-def fetch_player_redirects(country=None):
+def fetch_player_redirects(filters=None):
+    filters = filters or {}
+    country = filters.get("country")
     where_clause = f'P.Country="{country}"' if country else None
+
     batch_query_fn = lambda offset, limit: site.cargo_client.query(
         tables="PlayerRedirects=PR, Players=P",
         join_on="PR.ID=P.ID",
@@ -92,10 +115,10 @@ def fetch_player_redirects(country=None):
         limit=limit,
         offset=offset
     )
-    return fetch_with_offset(batch_query_fn, "player redirects", country)
+    return fetch_with_offset(batch_query_fn, "player redirects")
 
 
-def fetch_teams():
+def fetch_teams(filters=None):
     batch_query_fn = lambda offset, limit: site.cargo_client.query(
         tables="Teams",
         fields="Name,Short,Region,Image,IsDisbanded,RenamedTo",
@@ -122,16 +145,17 @@ if __name__ == "__main__":
     raw_teams_file_path = get_raw_file_path("teams")
 
     country = "South Korea"
-    players = fetch_players(country)
+    filters = {"country": country}
+    players = fetch_players(filters)
     save_csv(players, raw_players_file_path)
 
-    tenures = fetch_tenures(country)
+    tenures = fetch_tenures(filters)
     save_csv(tenures, raw_tenures_file_path)
 
-    roster_changes = fetch_roster_changes(country)
+    roster_changes = fetch_roster_changes(filters)
     save_csv(roster_changes, raw_roster_changes_file_path)
 
-    player_redirects = fetch_player_redirects()
+    player_redirects = fetch_player_redirects(filters)
     save_csv(player_redirects, raw_player_redirects_file_path)
 
     teams = fetch_teams()
