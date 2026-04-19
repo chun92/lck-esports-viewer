@@ -82,7 +82,6 @@ def fetch_tenures(filters=None):
     )
     return fetch_with_offset(batch_query_fn, "tenures")
 
-
 def fetch_roster_changes(filters=None):
     filters = filters or {}
     country = filters.get("country")
@@ -104,47 +103,39 @@ def fetch_roster_changes(filters=None):
     )
     return fetch_with_offset(batch_query_fn, "roster changes")
 
-
-def fetch_player_redirects(filters=None):
-    filters = filters or {}
-    country = filters.get("country")
-    where_clause = f'P.Country="{country}"' if country else None
-
-    batch_query_fn = lambda offset, limit: site.cargo_client.query(
-        tables="PlayerRedirects=PR, Players=P",
-        join_on="PR.ID=P.ID",
-        fields="PR.AllName,PR.ID",
-        where=where_clause,
-        limit=limit,
-        offset=offset
-    )
-    return fetch_with_offset(batch_query_fn, "player redirects")
-
-
 def fetch_teams(filters=None):
     batch_query_fn = lambda offset, limit: site.cargo_client.query(
         tables="Teams",
-        fields="Name,Short,Region,Image,IsDisbanded,RenamedTo",
+        fields="Name,Short,OverviewPage,Region,Image,IsDisbanded,RenamedTo",
         limit=limit,
         offset=offset
     )
     return fetch_with_offset(batch_query_fn, "teams")
 
-def save_csv(data, file_path):
-    if not data:
-        print(f"Warning: No data to save for {file_path}")
-        return
-    with open(file_path, 'w', newline='', encoding='utf-8') as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=data[0].keys())
-        writer.writeheader()
-        writer.writerows(data)
+def read_csv(file_path):
+    with open(file_path, 'r', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        return list(reader)
 
+def upsert_csv(new_data, file_path, key_fn):
+    if not new_data:
+        return
+    
+    existing = read_csv(file_path) if file_path.exists() else []
+    existing_dict = {key_fn(row): row for row in existing}
+    for row in new_data:
+        existing_dict[key_fn(row)] = row  # 중복 제거 및 업데이트
+
+    with open(file_path, 'w', newline='', encoding='utf-8') as csvfile:
+        all_rows = list(existing_dict.values())
+        writer = csv.DictWriter(csvfile, fieldnames=all_rows[0].keys())
+        writer.writeheader()
+        writer.writerows(all_rows)
 
 if __name__ == "__main__":
     raw_players_file_path = get_raw_file_path("players")
     raw_tenures_file_path = get_raw_file_path("tenures")
     raw_roster_changes_file_path = get_raw_file_path("roster_changes")
-    raw_player_redirects_file_path = get_raw_file_path("player_redirects")
     raw_teams_file_path = get_raw_file_path("teams")
 
     fetched_time = get_last_fetched()
@@ -154,19 +145,16 @@ if __name__ == "__main__":
     start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     players = fetch_players(filters)
-    save_csv(players, raw_players_file_path)
+    upsert_csv(players, raw_players_file_path, key_fn=lambda r: r['Player'])
 
     tenures = fetch_tenures(filters)
-    save_csv(tenures, raw_tenures_file_path)
+    upsert_csv(tenures, raw_tenures_file_path, key_fn=lambda r: f"{r['Player']}_{r['Team']}_{r['DateJoin'] or r['DateLeave']}")
 
     roster_changes = fetch_roster_changes(filters)
-    save_csv(roster_changes, raw_roster_changes_file_path)
-
-    player_redirects = fetch_player_redirects(filters)
-    save_csv(player_redirects, raw_player_redirects_file_path)
+    upsert_csv(roster_changes, raw_roster_changes_file_path, key_fn=lambda r: r['RosterChangeId'])
 
     teams = fetch_teams()
-    save_csv(teams, raw_teams_file_path)
+    upsert_csv(teams, raw_teams_file_path, key_fn=lambda r: r['OverviewPage'])
     
     set_last_fetched(start_time)
     print(f"Data fetched at: {get_last_fetched()}")
