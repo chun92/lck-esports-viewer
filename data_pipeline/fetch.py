@@ -1,8 +1,11 @@
 from mwrogue.esports_client import EsportsClient # type: ignore
 from mwrogue.auth_credentials import AuthCredentials # type: ignore
+from datetime import datetime
 import csv
 import time
-from paths import get_raw_file_path
+
+
+from paths import get_raw_file_path, get_last_fetched, set_last_fetched
 
 credentials = AuthCredentials(user_file="me")
 site = EsportsClient('lol', credentials=credentials)
@@ -144,8 +147,12 @@ if __name__ == "__main__":
     raw_player_redirects_file_path = get_raw_file_path("player_redirects")
     raw_teams_file_path = get_raw_file_path("teams")
 
+    fetched_time = get_last_fetched()
+    print(f"Last fetched time: {fetched_time}")
     country = "South Korea"
-    filters = {"country": country}
+    filters = {"country": country, "since_date": fetched_time}
+    start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
     players = fetch_players(filters)
     save_csv(players, raw_players_file_path)
 
@@ -160,3 +167,6 @@ if __name__ == "__main__":
 
     teams = fetch_teams()
     save_csv(teams, raw_teams_file_path)
+    
+    set_last_fetched(start_time)
+    print(f"Data fetched at: {get_last_fetched()}")
