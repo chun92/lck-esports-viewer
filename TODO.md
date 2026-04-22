@@ -16,16 +16,19 @@
 - [ ] `data/players.json`, `data/teams.json` 생성
 
 ## 3단계 — Node.js: API 서버 구성
-- [ ] Express 프로젝트 세팅 (`api-server/`)
-- [ ] `GET /api/players`, `GET /api/players/:id`
-- [ ] `GET /api/teams`, `GET /api/teams/:id/roster`
+- [x] Express 프로젝트 세팅 (`api-server/`)
+- [x] `GET /players`, `GET /players/:id`
+- [ ] `GET /teams`, `GET /teams/:id/roster` (teams.json 선행 필요)
 
-## 4단계 — Vanilla JS: 프론트엔드
-- [ ] 선수 카드 목록 렌더링 (`frontend/`)
+## 4단계 — 프론트엔드 (React + Vite, 에이전트 위임)
+- [x] Vite + React + TS + Tailwind v4 스캐폴드 (`frontend/`)
+- [x] 해시 라우팅 (`/#/player/:id`)
+- [x] 선수 상세 페이지 (헤더 + Career Timeline)
+- [x] 데이터 예외 처리 규칙 유틸 (fallback / formatPeriod / resolveDuration)
+- [ ] 선수 목록 페이지
 - [ ] 팀별 로스터 보기
-- [ ] API `fetch()` 연동
 
 ## 5단계 — 기능 확장
 - [ ] 검색 / 포지션별 필터 / 정렬
-- [ ] 선수 상세 페이지
+- [ ] 선수 상세 페이지 확장: 사진, 경기 기록, 커리어 타이틀 등
 - [ ] (선택) Python 데이터 보강 — 이적 이력, 통계 등

@@ -1,6 +1,10 @@
 # Claude Code
 .claude/
 
+# Agent skills (vendored — restore via skills-lock.json)
+.agents/
+skills/
+
 # Python
 __pycache__/
 *.py[cod]

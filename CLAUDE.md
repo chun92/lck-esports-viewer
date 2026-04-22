@@ -12,8 +12,10 @@ League of Legends LCK 리그의 선수/팀 정보를 보여주는 웹 앱.
 - [ ] Express 라우팅, 미들웨어
 - [ ] `async/await`, Promise 비동기 처리
 - [ ] 배열 메서드 (`map`, `filter`, `reduce`, `find`)
-- [ ] `fetch` API, DOM 조작
+- [ ] `fetch` API
 - [ ] REST API 설계 원칙
+
+> 프론트엔드는 에이전트에 위임하므로 재활 대상에서 제외.
 
 ### Python
 - [ ] 함수/클래스 설계
@@ -29,7 +31,7 @@ League of Legends LCK 리그의 선수/팀 정보를 보여주는 웹 앱.
 |--------|------|
 | 데이터 수집/가공 | Python 3.11+ |
 | API 서버 | Node.js 20+ / Express |
-| 프론트엔드 | Vanilla HTML/CSS/JavaScript |
+| 프론트엔드 | React + Vite (에이전트에 위임) |
 | 데이터 저장 | JSON 파일 → (추후) SQLite |
 | 데이터 소스 | Leaguepedia API (Fandom) |
 
@@ -46,10 +48,11 @@ practice/
 │   │   ├── routes/
 │   │   └── index.js
 │   └── package.json
-├── frontend/           # Vanilla JS 프론트엔드
+├── frontend/           # React + Vite (에이전트가 구현)
+│   ├── src/
 │   ├── index.html
-│   ├── style.css
-│   └── app.js
+│   ├── vite.config.js
+│   └── package.json
 └── data/               # 공유 데이터 (Python → Node.js)
     └── players.json
 ```
