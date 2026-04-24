@@ -7,11 +7,16 @@
             "tenures": "tenures.csv",
             "roster_changes": "roster_changes.csv",
             "player_redirects": "player_redirects.csv",
-            "teams": "teams.csv"
+            "teams": "teams.csv",
+            "team_renames": "team_renames.csv",
+            "team_redirects": "team_redirects.csv"
         },
         "processed_data": {
             "data_directory": "processed",
-            "players_info": "players_info.json"
+            "players_info": "players_info.json",
+            "players_list": "players_list.csv",
+            "teams_info": "teams_info.json",
+            "teams_orphan": "teams_orphan.json"
         }
     }
 }

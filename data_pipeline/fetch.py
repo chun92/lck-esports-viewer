@@ -1,6 +1,7 @@
 from mwrogue.esports_client import EsportsClient # type: ignore
 from mwrogue.auth_credentials import AuthCredentials # type: ignore
 from datetime import datetime
+import argparse
 import csv
 import time
 
@@ -112,6 +113,26 @@ def fetch_teams(filters=None):
     )
     return fetch_with_offset(batch_query_fn, "teams")
 
+
+def fetch_team_renames(filters=None):
+    batch_query_fn = lambda offset, limit: site.cargo_client.query(
+        tables="TeamRenames",
+        fields="Date,OriginalName,NewName,Verb,Slot,IsSamePage,NewsId",
+        limit=limit,
+        offset=offset
+    )
+    return fetch_with_offset(batch_query_fn, "team_renames")
+
+
+def fetch_team_redirects(filters=None):
+    batch_query_fn = lambda offset, limit: site.cargo_client.query(
+        tables="TeamRedirects",
+        fields="AllName,OtherName",
+        limit=limit,
+        offset=offset
+    )
+    return fetch_with_offset(batch_query_fn, "team_redirects")
+
 def read_csv(file_path):
     with open(file_path, 'r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
@@ -132,11 +153,17 @@ def upsert_csv(new_data, file_path, key_fn):
         writer.writeheader()
         writer.writerows(all_rows)
 
-if __name__ == "__main__":
-    raw_players_file_path = get_raw_file_path("players")
-    raw_tenures_file_path = get_raw_file_path("tenures")
-    raw_roster_changes_file_path = get_raw_file_path("roster_changes")
-    raw_teams_file_path = get_raw_file_path("teams")
+ALL_TABLES = [
+    "players", "tenures", "roster_changes",
+    "teams", "team_renames", "team_redirects",
+]
+
+
+def run_fetch(only=None, update_last_fetched=True):
+    selected = set(only) if only else set(ALL_TABLES)
+    unknown = selected - set(ALL_TABLES)
+    if unknown:
+        raise SystemExit(f"Unknown tables: {sorted(unknown)}. Valid: {ALL_TABLES}")
 
     fetched_time = get_last_fetched()
     print(f"Last fetched time: {fetched_time}")
@@ -144,17 +171,42 @@ if __name__ == "__main__":
     filters = {"country": country, "since_date": fetched_time}
     start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    players = fetch_players(filters)
-    upsert_csv(players, raw_players_file_path, key_fn=lambda r: r['Player'])
+    if "players" in selected:
+        players = fetch_players(filters)
+        upsert_csv(players, get_raw_file_path("players"), key_fn=lambda r: r['Player'])
 
-    tenures = fetch_tenures(filters)
-    upsert_csv(tenures, raw_tenures_file_path, key_fn=lambda r: f"{r['Player']}_{r['Team']}_{r['DateJoin'] or r['DateLeave']}")
+    if "tenures" in selected:
+        tenures = fetch_tenures(filters)
+        upsert_csv(tenures, get_raw_file_path("tenures"),
+                   key_fn=lambda r: f"{r['Player']}_{r['Team']}_{r['DateJoin'] or r['DateLeave']}")
 
-    roster_changes = fetch_roster_changes(filters)
-    upsert_csv(roster_changes, raw_roster_changes_file_path, key_fn=lambda r: r['RosterChangeId'])
+    if "roster_changes" in selected:
+        roster_changes = fetch_roster_changes(filters)
+        upsert_csv(roster_changes, get_raw_file_path("roster_changes"),
+                   key_fn=lambda r: r['RosterChangeId'])
 
-    teams = fetch_teams()
-    upsert_csv(teams, raw_teams_file_path, key_fn=lambda r: r['OverviewPage'])
-    
-    set_last_fetched(start_time)
+    if "teams" in selected:
+        teams = fetch_teams()
+        upsert_csv(teams, get_raw_file_path("teams"), key_fn=lambda r: r['OverviewPage'])
+
+    if "team_renames" in selected:
+        renames = fetch_team_renames()
+        upsert_csv(renames, get_raw_file_path("team_renames"),
+                   key_fn=lambda r: f"{r.get('Date','')}_{r.get('OriginalName','')}_{r.get('NewName','')}")
+
+    if "team_redirects" in selected:
+        redirects = fetch_team_redirects()
+        upsert_csv(redirects, get_raw_file_path("team_redirects"),
+                   key_fn=lambda r: f"{r.get('PageName','')}_{r.get('AllName','')}")
+
+    if update_last_fetched and not only:
+        set_last_fetched(start_time)
     print(f"Data fetched at: {get_last_fetched()}")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Fetch Leaguepedia data")
+    parser.add_argument("--only", nargs="+", choices=ALL_TABLES,
+                        help="Fetch only specified tables (default: all)")
+    args = parser.parse_args()
+    run_fetch(only=args.only)

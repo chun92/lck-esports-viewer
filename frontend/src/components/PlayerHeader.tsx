@@ -1,11 +1,13 @@
+import { Link } from 'react-router-dom'
 import { fallback, splitRoles, type PlayerMeta } from '@/lib/player'
 
 interface Props {
   meta: PlayerMeta
   career: string
+  teamLink?: string | null
 }
 
-export function PlayerHeader({ meta, career }: Props) {
+export function PlayerHeader({ meta, career, teamLink }: Props) {
   const roles = splitRoles(meta.RoleLast || meta.Role)
   const isRetired = meta.IsRetired === '1'
 
@@ -31,11 +33,19 @@ export function PlayerHeader({ meta, career }: Props) {
 
       <div className="flex flex-col items-start gap-3 min-[900px]:items-end">
         <div className="flex flex-wrap justify-start gap-2 min-[900px]:justify-end">
-          {meta.Team && (
-            <span className="inline-flex items-center rounded-full border border-accent-gold/[0.35] bg-accent-gold/[0.12] px-3 py-[6px] text-[13px] font-semibold leading-none text-accent-gold">
-              {meta.Team}
-            </span>
-          )}
+          {meta.Team &&
+            (teamLink ? (
+              <Link
+                to={`/team/${encodeURIComponent(teamLink)}`}
+                className="inline-flex items-center rounded-full border border-accent-gold/[0.35] bg-accent-gold/[0.12] px-3 py-[6px] text-[13px] font-semibold leading-none text-accent-gold hover:border-accent-gold hover:bg-accent-gold/[0.2]"
+              >
+                {meta.Team}
+              </Link>
+            ) : (
+              <span className="inline-flex items-center rounded-full border border-accent-gold/[0.35] bg-accent-gold/[0.12] px-3 py-[6px] text-[13px] font-semibold leading-none text-accent-gold">
+                {meta.Team}
+              </span>
+            ))}
           {roles.map((r) => (
             <span
               key={r}

@@ -15,6 +15,9 @@ app.get('/', (req, res) => {
 const playersRouter = require('./routes/players')
 app.use('/players', playersRouter)
 
+const teamsRouter = require('./routes/teams')
+app.use('/teams', teamsRouter)
+
 app.use((req, res) => {
     res.status(404).json({ error: 'Not found', path: req.path })
 })

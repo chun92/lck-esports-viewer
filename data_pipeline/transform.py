@@ -5,6 +5,55 @@ from datetime import datetime
 
 from paths import get_raw_file_path, get_processed_file_path
 
+
+INGAME_ROLES = {"Top", "Jungle", "Mid", "Bot", "Support"}
+COACH_KEYWORDS = ("Coach",)
+STAFF_KEYWORDS = (
+    "Manager", "Owner", "Director", "Advisor", "Supervisor",
+    "CEO", "Scout", "Chief", "Board",
+)
+MEDIA_KEYWORDS = (
+    "Streamer", "Caster", "Broadcast", "Journalist",
+    "Content Creator", "Translator",
+)
+ANALYST_KEYWORDS = ("Analyst",)
+
+
+def normalize_role(raw):
+    if not raw:
+        return ""
+    # "Mid/Part-Owner", "Assistant Coach;Bot" 같이 복합 역할의 첫 토큰 사용
+    first = raw.replace(";", "/").split("/")[0].strip()
+    return first
+
+
+def categorize_role(raw):
+    if not raw:
+        return ""
+    tokens = [t.strip() for t in raw.replace(";", "/").split("/") if t.strip()]
+    for t in tokens:
+        if t in INGAME_ROLES:
+            return t
+    blob = raw
+    if any(k in blob for k in COACH_KEYWORDS):
+        return "Coach"
+    if any(k in blob for k in ANALYST_KEYWORDS):
+        return "Analyst"
+    if any(k in blob for k in STAFF_KEYWORDS):
+        return "Staff"
+    if any(k in blob for k in MEDIA_KEYWORDS):
+        return "Media"
+    return "Other"
+
+
+def debut_year(history):
+    years = []
+    for t in history:
+        start = t.get("StartDate") or ""
+        if len(start) >= 4 and start[:4].isdigit():
+            years.append(int(start[:4]))
+    return min(years) if years else ""
+
 def parse_date(s):
     if not s:
         return None
@@ -132,7 +181,386 @@ def build_player_history(tenures, roster_changes):
             'IsCurrent': is_current
         })
 
-    return player_history
+    return merge_contiguous_tenures(player_history)
+
+
+def _days_to_duration(days):
+    if days is None:
+        return ""
+    years, rem = divmod(days, 365)
+    months = rem // 30
+    parts = []
+    if years:
+        parts.append(f"{years} Year{'s' if years != 1 else ''}")
+    if months:
+        parts.append(f"{months} Month{'s' if months != 1 else ''}")
+    return ", ".join(parts) if parts else f"{days} Day{'s' if days != 1 else ''}"
+
+
+def merge_contiguous_tenures(history):
+    """같은 팀/포지션이고 기간이 정확히 맞닿는(앞 EndDate == 뒤 StartDate) tenure들을 하나로 합침."""
+    if not history:
+        return history
+    merged = [dict(history[0])]
+    for cur in history[1:]:
+        prev = merged[-1]
+        if (
+            cur.get('Team') == prev.get('Team')
+            and cur.get('Position') == prev.get('Position')
+            and prev.get('EndDate')
+            and cur.get('StartDate')
+            and prev['EndDate'] == cur['StartDate']
+        ):
+            prev['EndDate'] = cur.get('EndDate', '')
+            prev['IsCurrent'] = cur.get('IsCurrent', prev.get('IsCurrent'))
+            start_t = parse_date(prev.get('StartDate'))
+            end_t = parse_date(prev['EndDate']) if prev['EndDate'] else datetime.now()
+            if start_t and end_t:
+                approx = (end_t - start_t).days
+                prev['ApproximateDuration'] = approx
+                prev['Duration'] = _days_to_duration(approx)
+            continue
+        merged.append(dict(cur))
+    return merged
+
+POSITION_SORT_ORDER = ["Top", "Jungle", "Mid", "Bot", "Support"]
+
+
+def _roster_sort_key(entry):
+    cat = entry.get("PositionCategory", "")
+    if cat in POSITION_SORT_ORDER:
+        return (0, POSITION_SORT_ORDER.index(cat))
+    if cat == "Coach":
+        return (1, 0)
+    return (2, 0)
+
+
+def _logo_url(image):
+    if not image:
+        return ""
+    return f"https://lol.fandom.com/wiki/Special:FilePath/{image.replace(' ', '_')}"
+
+
+def build_name_resolution(teams_by_op, teams_raw, extra_names=()):
+    """name -> OverviewPage 맵.
+    해석 순서:
+      1) OverviewPage 정확 일치
+      2) TeamRenames + teams.csv RenamedTo 체인 따라가기
+      3) Name 필드 정확 일치
+      4) 대소문자 무시 일치 (OverviewPage/Name)
+    """
+    rename_rows = read_csv(get_raw_file_path("team_renames"))
+    rename_rows.sort(key=lambda r: r.get("Date", ""))
+    next_name = {}  # lowercase key -> next name
+    for r in rename_rows:
+        orig = (r.get("OriginalName") or "").strip()
+        new = (r.get("NewName") or "").strip()
+        if orig and new and orig.lower() != new.lower():
+            next_name[orig.lower()] = new
+    for op, team in teams_by_op.items():
+        rt = team.get("RenamedTo")
+        if rt and op.lower() not in next_name:
+            next_name[op.lower()] = rt
+
+    # 보조 lookup
+    by_name = {}
+    by_op_lower = {op.lower(): op for op in teams_by_op}
+    by_name_lower = {}
+    for t in teams_raw:
+        op = t.get("OverviewPage", "")
+        name = (t.get("Name") or "").strip()
+        if op and name:
+            by_name.setdefault(name, op)
+            by_name_lower.setdefault(name.lower(), op)
+
+    def canonicalize(name):
+        if name in teams_by_op:
+            return name
+        if name in by_name:
+            return by_name[name]
+        low = name.lower()
+        if low in by_op_lower:
+            return by_op_lower[low]
+        if low in by_name_lower:
+            return by_name_lower[low]
+        return None
+
+    resolution = {}
+    def resolve(name):
+        if name in resolution:
+            return resolution[name]
+        visited = [name]
+        cur = name
+        seen = {name.lower()}
+        final = canonicalize(cur)
+        while final is None:
+            nxt = next_name.get(cur.lower())
+            if not nxt or nxt.lower() in seen:
+                break
+            cur = nxt
+            seen.add(cur.lower())
+            visited.append(cur)
+            final = canonicalize(cur)
+        for v in visited:
+            resolution[v] = final
+        return final
+
+    for name in list(teams_by_op.keys()):
+        resolve(name)
+    for name in extra_names:
+        if name and name not in resolution:
+            resolve(name)
+    return resolution
+
+
+def _duration_days(start, end):
+    if not start:
+        return 0
+    st = parse_date(start)
+    if st is None:
+        return 0
+    et = parse_date(end) if end else datetime.now()
+    if et is None:
+        return 0
+    return max((et - st).days, 0)
+
+
+def category_group(cat):
+    """병합 판단용 상위 계열. InGame(Top/Jungle/Mid/Bot/Support) / Coach / Other."""
+    if cat in INGAME_ROLES:
+        return "InGame"
+    if cat == "Coach":
+        return "Coach"
+    return "Other"
+
+
+def _merge_team_history_entries(entries):
+    """같은 선수/팀 이력을 상위 계열 + 연속 구간 기준으로 병합."""
+    if not entries:
+        return []
+    entries = sorted(entries, key=lambda e: (e["StartDate"] or "", e["EndDate"] or ""))
+    merged = []
+    current = None
+    for e in entries:
+        if current is None:
+            current = _start_group(e)
+            continue
+        same_group = category_group(e["PositionCategory"]) == category_group(current["PositionCategory"])
+        contiguous = (
+            current["EndDate"]
+            and e["StartDate"]
+            and current["EndDate"] == e["StartDate"]
+        )
+        if same_group and contiguous:
+            _extend_group(current, e)
+        else:
+            merged.append(_finalize_group(current))
+            current = _start_group(e)
+    if current:
+        merged.append(_finalize_group(current))
+    return merged
+
+
+def _start_group(e):
+    days = _duration_days(e["StartDate"], e["EndDate"])
+    return {
+        "Player": e["Player"],
+        "ID": e["ID"],
+        "PositionCategory": e["PositionCategory"],
+        "TeamAtTime": e.get("TeamAtTime", ""),
+        "StartDate": e["StartDate"],
+        "EndDate": e["EndDate"],
+        "IsCurrent": bool(e.get("IsCurrent")),
+        "_positions": [(e["Position"], e["PositionCategory"], days)],
+    }
+
+
+def _extend_group(g, e):
+    g["EndDate"] = e["EndDate"]
+    g["IsCurrent"] = bool(e.get("IsCurrent"))
+    days = _duration_days(e["StartDate"], e["EndDate"])
+    g["_positions"].append((e["Position"], e["PositionCategory"], days))
+
+
+def _finalize_group(g):
+    # Position: 기간 내림차순으로 slash 병기. 등장 순서를 안정적 tiebreak로 사용.
+    pos_agg = defaultdict(int)
+    pos_order = []
+    for pos, _cat, days in g["_positions"]:
+        if not pos:
+            continue
+        if pos not in pos_agg:
+            pos_order.append(pos)
+        pos_agg[pos] += days
+    ordered = sorted(pos_agg.items(), key=lambda kv: (-kv[1], pos_order.index(kv[0])))
+    g["Position"] = " / ".join(p for p, _ in ordered)
+    # 대표 PositionCategory: 가장 오래 머문 세부 카테고리 (같은 그룹 내 비교용)
+    cat_agg = defaultdict(int)
+    for _pos, cat, days in g["_positions"]:
+        if cat:
+            cat_agg[cat] += days
+    if cat_agg:
+        g["PositionCategory"] = max(cat_agg.items(), key=lambda kv: kv[1])[0]
+    approx = _duration_days(g["StartDate"], g["EndDate"])
+    g["ApproximateDuration"] = approx
+    g["Duration"] = _days_to_duration(approx)
+    del g["_positions"]
+    return g
+
+
+def build_teams(player_infos):
+    teams_raw = read_csv(get_raw_file_path("teams"))
+    teams_by_op = {}
+    for t in teams_raw:
+        op = t.get("OverviewPage", "")
+        if not op:
+            continue
+        teams_by_op[op] = {
+            "OverviewPage": op,
+            "Name": t.get("Name", ""),
+            "Short": t.get("Short", ""),
+            "Region": t.get("Region", ""),
+            "Image": t.get("Image", ""),
+            "LogoUrl": _logo_url(t.get("Image", "")),
+            "IsDisbanded": t.get("IsDisbanded", "") == "1",
+            "RenamedTo": t.get("RenamedTo", "") or None,
+            "Predecessors": [],
+            "FormerNames": [],
+            "CurrentRoster": [],
+            "PlayerHistory": [],
+        }
+
+    # Collect all team names referenced by player histories so they can be resolved.
+    history_names = set()
+    for p in player_infos:
+        for tenure in p["History"]:
+            name = tenure.get("Team")
+            if name:
+                history_names.add(name)
+        meta_team = p["Player"].get("Team")
+        if meta_team:
+            history_names.add(meta_team)
+
+    resolution = build_name_resolution(teams_by_op, teams_raw, extra_names=history_names)
+
+    # Predecessors: reverse-map RenamedTo (teams.csv 내부 관계만)
+    for op, team in teams_by_op.items():
+        rt = team["RenamedTo"]
+        if rt and rt in teams_by_op:
+            teams_by_op[rt]["Predecessors"].append(op)
+
+    # FormerNames: teams.csv에 엔트리가 없지만 이 팀으로 귀결되는 구 이름들
+    for name, final in resolution.items():
+        if final and name != final and name not in teams_by_op:
+            teams_by_op[final]["FormerNames"].append(name)
+
+    # Collect per-team per-player tenure entries; detect orphans.
+    tenures_per_team_player = defaultdict(lambda: defaultdict(list))
+    orphan_counts = defaultdict(lambda: {"TenureCount": 0, "SamplePlayers": []})
+    for p in player_infos:
+        meta = p["Player"]
+        player_key = meta.get("Player", "")
+        player_id = meta.get("ID", "")
+        for tenure in p["History"]:
+            team_name = tenure.get("Team", "")
+            if not team_name:
+                continue
+            position_raw = tenure.get("Position") or ""
+            resolved = resolution.get(team_name) or (team_name if team_name in teams_by_op else None)
+            entry = {
+                "Player": player_key,
+                "ID": player_id,
+                "Position": normalize_role(position_raw),
+                "PositionCategory": categorize_role(position_raw),
+                "TeamAtTime": team_name,
+                "StartDate": tenure.get("StartDate", ""),
+                "EndDate": tenure.get("EndDate", ""),
+                "IsCurrent": tenure.get("IsCurrent") == "1",
+            }
+            if resolved:
+                tenures_per_team_player[resolved][player_key].append(entry)
+            else:
+                o = orphan_counts[team_name]
+                o["TenureCount"] += 1
+                if player_id and player_id not in o["SamplePlayers"] and len(o["SamplePlayers"]) < 5:
+                    o["SamplePlayers"].append(player_id)
+
+    meta_by_player = {p["Player"].get("Player", ""): p["Player"] for p in player_infos}
+    for resolved, by_player in tenures_per_team_player.items():
+        for player_key, entries in by_player.items():
+            merged = _merge_team_history_entries(entries)
+            is_retired = meta_by_player.get(player_key, {}).get("IsRetired") == "1"
+            for g in merged:
+                if g["IsCurrent"]:
+                    if is_retired:
+                        continue
+                    teams_by_op[resolved]["CurrentRoster"].append({
+                        "Player": g["Player"],
+                        "ID": g["ID"],
+                        "Position": g["Position"],
+                        "PositionCategory": g["PositionCategory"],
+                        "JoinDate": g["StartDate"],
+                    })
+                elif g["EndDate"]:
+                    teams_by_op[resolved]["PlayerHistory"].append(g)
+
+    # Sort
+    for team in teams_by_op.values():
+        team["CurrentRoster"].sort(key=lambda r: (_roster_sort_key(r), r["JoinDate"] or "", r["ID"].lower()))
+        team["PlayerHistory"].sort(key=lambda e: (e["StartDate"] or "", e["ID"].lower()))
+        team["Predecessors"].sort()
+        team["FormerNames"].sort()
+
+    teams_list = sorted(teams_by_op.values(), key=lambda t: t["OverviewPage"].lower())
+
+    orphan_list = sorted(
+        (
+            {"TeamName": name, "TenureCount": v["TenureCount"], "SamplePlayers": v["SamplePlayers"]}
+            for name, v in orphan_counts.items()
+        ),
+        key=lambda o: (-o["TenureCount"], o["TeamName"].lower()),
+    )
+    return teams_list, orphan_list
+
+
+def build_player_list(player_infos):
+    rows = []
+    for p in player_infos:
+        meta = p["Player"]
+        history = p["History"]
+        team = meta.get("Team") or meta.get("TeamLast") or ""
+        role_raw = meta.get("Role") or meta.get("RoleLast") or ""
+        position = normalize_role(role_raw)
+        category = categorize_role(role_raw)
+        is_active = 1 if (meta.get("Team") and meta.get("IsRetired") != "1") else 0
+        rows.append({
+            "Player": meta.get("Player", ""),
+            "ID": meta.get("ID", ""),
+            "Name": meta.get("Name", ""),
+            "NativeName": meta.get("NativeName", ""),
+            "Country": meta.get("Country", ""),
+            "DebutYear": debut_year(history),
+            "Team": team,
+            "Role": role_raw,
+            "Position": position,
+            "PositionCategory": category,
+            "IsActive": is_active,
+            "Age": meta.get("Age", ""),
+        })
+    rows.sort(key=lambda r: r["Player"].lower())
+    return rows
+
+
+def write_player_list_csv(rows, output_path):
+    fieldnames = [
+        "Player", "ID", "Name", "NativeName", "Country", "DebutYear",
+        "Team", "Role", "Position", "PositionCategory", "IsActive", "Age",
+    ]
+    with open(output_path, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
 
 if __name__ == "__main__":
     player_infos = build_player_histories()
@@ -140,3 +568,17 @@ if __name__ == "__main__":
     output_path = get_processed_file_path("players_info")
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(player_infos, f, ensure_ascii=False, indent=4)
+    list_rows = build_player_list(player_infos)
+    list_path = get_processed_file_path("players_list")
+    write_player_list_csv(list_rows, list_path)
+    print(f"Wrote {len(list_rows)} rows to {list_path}")
+
+    teams_list, orphan_list = build_teams(player_infos)
+    teams_path = get_processed_file_path("teams_info")
+    with open(teams_path, "w", encoding="utf-8") as f:
+        json.dump(teams_list, f, ensure_ascii=False, indent=2)
+    print(f"Wrote {len(teams_list)} teams to {teams_path}")
+    orphan_path = get_processed_file_path("teams_orphan")
+    with open(orphan_path, "w", encoding="utf-8") as f:
+        json.dump(orphan_list, f, ensure_ascii=False, indent=2)
+    print(f"Wrote {len(orphan_list)} orphan teams to {orphan_path}")

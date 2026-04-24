@@ -12,23 +12,45 @@
 - [ ] 추후 PlayerLeagueHistory, ScoreboardGames, ScoreboardPlayers, ScoreboardTeams, TournamentPlayers 등을 가져올 수 있을 듯.
 
 ## 2단계 — Python: 데이터 가공
-- [ ] `data-pipeline/transform.py` — 필요한 필드 추출/정제
-- [ ] `data/players.json`, `data/teams.json` 생성
+- [x] `data_pipeline/transform.py` — 필드 추출/정제, 선수 이력 조립
+- [x] `players_info.json`, `players_list.csv`, `teams_info.json`, `teams_orphan.json` 생성
+- [x] TeamRenames/RenamedTo 체인으로 팀 이름 canonical 해석
+- [x] 연속된 tenure 구간 병합 (선수 Career Timeline)
+- [x] 팀 PlayerHistory: 계열 기반 병합 + 포지션 slash 병기
 
 ## 3단계 — Node.js: API 서버 구성
 - [x] Express 프로젝트 세팅 (`api-server/`)
 - [x] `GET /players`, `GET /players/:id`
-- [ ] `GET /teams`, `GET /teams/:id/roster` (teams.json 선행 필요)
+- [x] `GET /teams`, `GET /teams/:id`
 
 ## 4단계 — 프론트엔드 (React + Vite, 에이전트 위임)
 - [x] Vite + React + TS + Tailwind v4 스캐폴드 (`frontend/`)
 - [x] 해시 라우팅 (`/#/player/:id`)
 - [x] 선수 상세 페이지 (헤더 + Career Timeline)
 - [x] 데이터 예외 처리 규칙 유틸 (fallback / formatPeriod / resolveDuration)
-- [ ] 선수 목록 페이지
-- [ ] 팀별 로스터 보기
 
-## 5단계 — 기능 확장
-- [ ] 검색 / 포지션별 필터 / 정렬
-- [ ] 선수 상세 페이지 확장: 사진, 경기 기록, 커리어 타이틀 등
-- [ ] (선택) Python 데이터 보강 — 이적 이력, 통계 등
+## 5단계 — 선수 목록 페이지
+- [x] 목록 렌더링 + 페이지네이션
+- [x] 검색 (ID / Name / 전체 필드)
+- [x] 고급 필터 (포지션 멀티 체크, 팀 드롭다운, 데뷔년도)
+- [x] 컬럼 헤더 클릭 정렬
+
+## 6단계 — 팀 페이지
+- [x] 팀 상세 페이지 구성 (헤더 + Current Roster + Player History)
+- [x] 선수 상세 페이지에서 팀 링크 연결 (canonical 이름으로 resolve)
+- [x] 팀 로고 수집/표시 (Leaguepedia Special:FilePath)
+- [x] 이전 이름(Predecessors / FormerNames) 표시
+- [x] Current Roster / Player History 계열별(InGame / Coach / Other) UI 분리
+- [x] Career Timeline 박스 전체 클릭 + 해석 불가한 팀 붉은색 표기
+
+## 7단계 — 선수 사진 추가
+- [ ] 사진 데이터 소스 확보 + 파이프라인 반영
+- [ ] 선수 상세 헤더에 사진 노출
+
+## 8단계 — 선수 시즌별 통계 페이지
+- [ ] 커리어/시즌별 플레이 정보
+- [ ] 승률
+- [ ] 사용 챔피언
+
+## 9단계 — 선수 비교 페이지
+- [ ] 선수별 커리어 기간 비교 UI

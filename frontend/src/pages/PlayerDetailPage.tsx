@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { CareerTimeline } from '@/components/CareerTimeline'
 import { PlayerHeader } from '@/components/PlayerHeader'
 import { ApiError, fetchPlayer } from '@/lib/api'
+import { loadKnownTeams, resolveTeamLink, type TeamLinkMap } from '@/lib/knownTeams'
 import { resolveDuration, yearsMonths, type PlayerResponse } from '@/lib/player'
 
 type Status =
@@ -13,6 +14,7 @@ type Status =
 export function PlayerDetailPage() {
   const { id = '' } = useParams<{ id: string }>()
   const [status, setStatus] = useState<Status>({ kind: 'loading' })
+  const [knownTeams, setKnownTeams] = useState<TeamLinkMap | null>(null)
 
   useEffect(() => {
     if (!id) {
@@ -38,7 +40,17 @@ export function PlayerDetailPage() {
         setStatus({ kind: 'error', message: msg })
       })
 
-    return () => controller.abort()
+    let cancelled = false
+    loadKnownTeams()
+      .then((teams) => {
+        if (!cancelled) setKnownTeams(teams)
+      })
+      .catch(() => {})
+
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
   }, [id])
 
   if (status.kind === 'loading') {
@@ -61,11 +73,16 @@ export function PlayerDetailPage() {
 
   const { Player: meta, History } = status.data
   const totalDays = History.reduce((acc, t) => acc + (resolveDuration(t) ?? 0), 0)
+  const teamLink = resolveTeamLink(knownTeams, meta.Team)
 
   return (
     <main className="mx-auto max-w-[1200px] px-8 py-12">
-      <PlayerHeader meta={meta} career={yearsMonths(totalDays)} />
-      <CareerTimeline history={History} />
+      <PlayerHeader
+        meta={meta}
+        career={yearsMonths(totalDays)}
+        teamLink={teamLink}
+      />
+      <CareerTimeline history={History} knownTeams={knownTeams} />
     </main>
   )
 }
