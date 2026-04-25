@@ -127,7 +127,7 @@ def fetch_team_renames(filters=None):
 def fetch_team_redirects(filters=None):
     batch_query_fn = lambda offset, limit: site.cargo_client.query(
         tables="TeamRedirects",
-        fields="AllName,OtherName",
+        fields="_pageName=PageName,AllName,OtherName",
         limit=limit,
         offset=offset
     )

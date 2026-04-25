@@ -53,7 +53,7 @@ interface ItemProps {
 }
 
 function TimelineItem({ tenure, isLast, isCurrent, duration, teamInfo }: ItemProps) {
-  const teamLink = teamInfo?.OverviewPage ?? null
+  const teamLink = teamInfo?.OverviewPage || null
   const outerClass = cn(
     'relative mb-3 grid items-center gap-4 rounded-[10px] border border-border bg-bg-surface px-6 py-4',
     'grid-cols-1 min-[900px]:grid-cols-[200px_1fr_auto]',
@@ -80,7 +80,7 @@ function TimelineItem({ tenure, isLast, isCurrent, duration, teamInfo }: ItemPro
         <span
           className={cn(
             'truncate text-[15px] font-bold',
-            teamLink ? 'text-text-primary' : 'text-danger'
+            teamInfo ? 'text-text-primary' : 'text-danger'
           )}
         >
           {fallback(tenure.Team)}

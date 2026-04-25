@@ -1,4 +1,4 @@
-import { fetchTeams } from './api'
+import { fetchHistoricalLogos, fetchTeams } from './api'
 
 export interface TeamLinkInfo {
   OverviewPage: string
@@ -14,18 +14,32 @@ export function loadKnownTeams(): Promise<TeamLinkMap> {
   if (cache instanceof Map) return Promise.resolve(cache)
   cache = null
   if (inflight) return inflight
-  inflight = fetchTeams()
-    .then((teams) => {
+  inflight = Promise.all([fetchTeams(), fetchHistoricalLogos()])
+    .then(([teams, historical]) => {
+      const historicalByKey = new Map<string, string>()
+      for (const [name, info] of Object.entries(historical)) {
+        if (info.LogoUrl) historicalByKey.set(name.toLowerCase(), info.LogoUrl)
+      }
+
       const map: TeamLinkMap = new Map()
       for (const t of teams) {
-        const info: TeamLinkInfo = {
+        const canonical: TeamLinkInfo = {
           OverviewPage: t.OverviewPage,
           LogoUrl: t.LogoUrl || '',
         }
-        map.set(t.OverviewPage.toLowerCase(), info)
-        if (t.Name) map.set(t.Name.toLowerCase(), info)
+        map.set(t.OverviewPage.toLowerCase(), canonical)
+        if (t.Name) map.set(t.Name.toLowerCase(), canonical)
         for (const n of t.FormerNames || []) {
-          map.set(n.toLowerCase(), info)
+          const key = n.toLowerCase()
+          map.set(key, {
+            OverviewPage: t.OverviewPage,
+            LogoUrl: historicalByKey.get(key) ?? canonical.LogoUrl,
+          })
+        }
+      }
+      for (const [key, logoUrl] of historicalByKey.entries()) {
+        if (!map.has(key)) {
+          map.set(key, { OverviewPage: '', LogoUrl: logoUrl })
         }
       }
       cache = map

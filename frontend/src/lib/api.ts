@@ -77,3 +77,15 @@ export async function fetchTeams(
   }
   return (await res.json()) as TeamSummary[]
 }
+
+export type HistoricalLogoMap = Record<string, { LogoUrl: string }>
+
+export async function fetchHistoricalLogos(
+  signal?: AbortSignal
+): Promise<HistoricalLogoMap> {
+  const res = await fetch(`${API_BASE}/teams/historical-logos`, { signal })
+  if (!res.ok) {
+    throw new ApiError(`Request failed (${res.status})`, res.status)
+  }
+  return (await res.json()) as HistoricalLogoMap
+}

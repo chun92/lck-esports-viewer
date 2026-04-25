@@ -55,7 +55,11 @@
   - 현재 Teams 정보에는 현재 이름의 로고만 존재
   - 예: ShowMaker는 DAMWON → DWG KIA → Dplus KIA로 팀 이름이 바뀌면서 로고도 매번 달라졌음 (https://lol.fandom.com/wiki/ShowMaker 참고)
   - rename 이전 시점에는 그 시점의 로고를 가져다 써야 함
-  - Leaguepedia에서 과거 로고를 어떻게 가져오는지 조사 후 파이프라인 반영
+  - PoC 완료: `data_pipeline/poc_historical_logos.py` (own-name imageinfo + redirect/rename chain + case-insensitive). 237/449 resolve, 212 phantom drop, 44 era-mismatch limitation 후보 (limitations.json)
+  - 운용 시 보강 backlog:
+    - revision-pinned CDN URL 저장 (현재 `Special:FilePath`는 latest로 redirect 됨 → wiki File 덮어쓰기에 취약)
+    - `historical_logos.json` append-only 모드 (재실행 시 기존 key는 freeze, 신규만 resolve. `--rebuild` 시만 전체 재계산)
+    - limitations.json 기반 수동 override 매핑 (MiG Frost → MiGlogo, Fredit BRION → BRIONlogo, 각 Academy/Challengers 옛 이름 등)
 - [ ] Team 목록 페이지 (Players 목록 페이지처럼 탐색 가능하게)
 
 ## 7단계 — 선수 사진 추가
