@@ -7,6 +7,10 @@ export interface TeamSummary {
   IsDisbanded: boolean
   RenamedTo: string | null
   FormerNames: string[]
+  Aliases: string[]
+  ActiveSince: string | null
+  ActiveUntil: string | null
+  HistoryCount: number
 }
 
 export interface RosterEntry {

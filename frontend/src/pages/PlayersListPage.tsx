@@ -136,6 +136,14 @@ export function PlayersListPage() {
 
   return (
     <main className="mx-auto max-w-[1200px] px-8 py-12">
+      <nav className="mb-4 flex items-center gap-4 text-[14px]">
+        <Link to="/players" className="font-semibold text-text-primary">
+          Players
+        </Link>
+        <Link to="/teams" className="text-text-muted hover:text-text-primary">
+          Teams
+        </Link>
+      </nav>
       <h1 className="mb-6 text-[32px] font-bold">Players</h1>
 
       <PlayerFilters
