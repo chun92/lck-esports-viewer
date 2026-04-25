@@ -43,6 +43,21 @@
 - [x] Current Roster / Player History 계열별(InGame / Coach / Other) UI 분리
 - [x] Career Timeline 박스 전체 클릭 + 해석 불가한 팀 붉은색 표기
 
+## 6.5단계 — 피드백 + 추가 구현
+
+### 피드백
+- [ ] Player 페이지 헤더: 현재 팀(이름 + 로고) / 포지션을 우측 badge가 아니라 이름 하단에 강조 표시
+- [ ] Player 페이지 Career Timeline: 팀 이름 옆에 팀 로고 표시
+- [ ] Team 페이지 Player History: Duration을 month → day 단위로 변경
+
+### 구현
+- [ ] Career Timeline의 팀 로고를 "당시 시점의 로고"로 표시
+  - 현재 Teams 정보에는 현재 이름의 로고만 존재
+  - 예: ShowMaker는 DAMWON → DWG KIA → Dplus KIA로 팀 이름이 바뀌면서 로고도 매번 달라졌음 (https://lol.fandom.com/wiki/ShowMaker 참고)
+  - rename 이전 시점에는 그 시점의 로고를 가져다 써야 함
+  - Leaguepedia에서 과거 로고를 어떻게 가져오는지 조사 후 파이프라인 반영
+- [ ] Team 목록 페이지 (Players 목록 페이지처럼 탐색 가능하게)
+
 ## 7단계 — 선수 사진 추가
 - [ ] 사진 데이터 소스 확보 + 파이프라인 반영
 - [ ] 선수 상세 헤더에 사진 노출

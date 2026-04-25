@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { fallback, yearsMonths } from '@/lib/player'
+import { fallback } from '@/lib/player'
 import {
   CATEGORY_GROUPS,
   categoryGroup,
@@ -111,8 +111,8 @@ function HistorySection({ label, items }: { label: string; items: TeamHistoryEnt
                     </Link>
                   </td>
                   <td className="px-4 py-3">{fallback(h.Position)}</td>
-                  <td className="px-4 py-3 text-right text-text-muted">
-                    {dur !== null ? yearsMonths(dur) : '—'}
+                  <td className="px-4 py-3 text-right tabular-nums text-text-muted">
+                    {dur !== null ? `${dur.toLocaleString()} days` : '—'}
                   </td>
                 </tr>
               )

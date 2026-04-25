@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom'
 import { CareerTimeline } from '@/components/CareerTimeline'
 import { PlayerHeader } from '@/components/PlayerHeader'
 import { ApiError, fetchPlayer } from '@/lib/api'
-import { loadKnownTeams, resolveTeamLink, type TeamLinkMap } from '@/lib/knownTeams'
+import { loadKnownTeams, resolveTeamInfo, type TeamLinkMap } from '@/lib/knownTeams'
 import { resolveDuration, yearsMonths, type PlayerResponse } from '@/lib/player'
 
 type Status =
@@ -73,14 +73,14 @@ export function PlayerDetailPage() {
 
   const { Player: meta, History } = status.data
   const totalDays = History.reduce((acc, t) => acc + (resolveDuration(t) ?? 0), 0)
-  const teamLink = resolveTeamLink(knownTeams, meta.Team)
+  const teamInfo = resolveTeamInfo(knownTeams, meta.Team)
 
   return (
     <main className="mx-auto max-w-[1200px] px-8 py-12">
       <PlayerHeader
         meta={meta}
         career={yearsMonths(totalDays)}
-        teamLink={teamLink}
+        teamInfo={teamInfo}
       />
       <CareerTimeline history={History} knownTeams={knownTeams} />
     </main>

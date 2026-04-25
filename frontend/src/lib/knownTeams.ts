@@ -1,6 +1,11 @@
 import { fetchTeams } from './api'
 
-export type TeamLinkMap = Map<string, string>
+export interface TeamLinkInfo {
+  OverviewPage: string
+  LogoUrl: string
+}
+
+export type TeamLinkMap = Map<string, TeamLinkInfo>
 
 let cache: TeamLinkMap | null = null
 let inflight: Promise<TeamLinkMap> | null = null
@@ -13,10 +18,14 @@ export function loadKnownTeams(): Promise<TeamLinkMap> {
     .then((teams) => {
       const map: TeamLinkMap = new Map()
       for (const t of teams) {
-        map.set(t.OverviewPage.toLowerCase(), t.OverviewPage)
-        if (t.Name) map.set(t.Name.toLowerCase(), t.OverviewPage)
+        const info: TeamLinkInfo = {
+          OverviewPage: t.OverviewPage,
+          LogoUrl: t.LogoUrl || '',
+        }
+        map.set(t.OverviewPage.toLowerCase(), info)
+        if (t.Name) map.set(t.Name.toLowerCase(), info)
         for (const n of t.FormerNames || []) {
-          map.set(n.toLowerCase(), t.OverviewPage)
+          map.set(n.toLowerCase(), info)
         }
       }
       cache = map
@@ -28,10 +37,17 @@ export function loadKnownTeams(): Promise<TeamLinkMap> {
   return inflight
 }
 
+export function resolveTeamInfo(
+  teams: TeamLinkMap | null | undefined,
+  name: string | undefined | null
+): TeamLinkInfo | null {
+  if (!(teams instanceof Map) || !name) return null
+  return teams.get(name.toLowerCase()) ?? null
+}
+
 export function resolveTeamLink(
   teams: TeamLinkMap | null | undefined,
   name: string | undefined | null
 ): string | null {
-  if (!(teams instanceof Map) || !name) return null
-  return teams.get(name.toLowerCase()) ?? null
+  return resolveTeamInfo(teams, name)?.OverviewPage ?? null
 }
