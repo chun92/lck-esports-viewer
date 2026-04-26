@@ -3,6 +3,7 @@ import csv
 import re
 from collections import defaultdict
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import quote
 
 from paths import get_raw_file_path, get_processed_file_path
@@ -73,11 +74,212 @@ def read_csv(file_path):
         return list(reader)
 
 
+_PLH_YEAR_RE = re.compile(r"(\d{4})")
+# 카탈로그/페이지 이름에 4자리 연도가 없는 케이스 대응 — Worlds Season 2/3 표기.
+_PLH_SEASON_TO_YEAR = {"Season 2": 2012, "Season 3": 2013}
+# 추가 수동 매핑은 league_year_overrides.csv 참조 (prefix 매칭, longest-match 우선).
+_PLH_OVERRIDES_FILE = Path(__file__).resolve().parent / "league_year_overrides.csv"
+
+
+def _load_year_overrides():
+    if not _PLH_OVERRIDES_FILE.exists():
+        return []
+    with open(_PLH_OVERRIDES_FILE, "r", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    pairs = []
+    for r in rows:
+        prefix = (r.get("league") or "").strip()
+        year_str = (r.get("year") or "").strip()
+        if not prefix or not year_str:
+            continue
+        try:
+            pairs.append((prefix, int(year_str)))
+        except ValueError:
+            continue
+    pairs.sort(key=lambda p: -len(p[0]))  # longest-prefix first
+    return pairs
+
+
+_PLH_OVERRIDE_PAIRS = _load_year_overrides()
+
+
+def _league_history_year(overview_page):
+    m = _PLH_YEAR_RE.search(overview_page)
+    if m:
+        return int(m.group(1))
+    for k, y in _PLH_SEASON_TO_YEAR.items():
+        if overview_page.startswith(k):
+            return y
+    for prefix, year in _PLH_OVERRIDE_PAIRS:
+        if overview_page.startswith(prefix):
+            return year
+    return None
+
+
+def _league_history_split(overview_page):
+    """OverviewPage에서 표시용 split 라벨 추출. 마지막 '/' 뒷부분, 없으면 페이지 전체."""
+    parts = overview_page.split("/")
+    return parts[-1] if len(parts) > 1 else overview_page
+
+
+# PlayerLeagueHistory에 등장하지만 leagues.csv/LeagueGroups에서 안 잡히는 국제전 보강
+_INTERNATIONAL_FALLBACK = {
+    "World Championship", "Mid-Season Invitational", "Esports World Cup",
+    "Rift Rivals", "All-Star", "First Stand",
+}
+
+
+def build_league_meta_map():
+    """PlayerLeagueHistory.League 이름 → {Short, Region, Level, IsOfficial, IsInternational}.
+    PLH의 League는 LeagueGroups.LongName과 매칭되므로 그쪽을 우선 조회하고,
+    멤버 League 중 하나라도 Region=International이면 그룹을 International로 표기."""
+    try:
+        leagues_rows = read_csv(get_raw_file_path("leagues"))
+    except FileNotFoundError:
+        leagues_rows = []
+    leagues_by_name = {}
+    for r in leagues_rows:
+        name = (r.get("League") or "").strip()
+        if name:
+            leagues_by_name[name] = {
+                "Short": (r.get("League Short") or "").strip(),
+                "Region": (r.get("Region") or "").strip(),
+                "Level": (r.get("Level") or "").strip(),
+                "IsOfficial": (r.get("IsOfficial") or "").strip() == "Yes",
+            }
+
+    try:
+        group_rows = read_csv(get_raw_file_path("league_groups"))
+    except FileNotFoundError:
+        group_rows = []
+
+    out = {}
+    for r in group_rows:
+        long_name = (r.get("LongName") or "").strip()
+        if not long_name:
+            continue
+        members = [m.strip() for m in (r.get("Leagues") or "").split(",") if m.strip()]
+        member_metas = [leagues_by_name[m] for m in members if m in leagues_by_name]
+        regions = {m["Region"] for m in member_metas if m["Region"]}
+        levels = {m["Level"] for m in member_metas if m["Level"]}
+        primary_member = next((m for m in member_metas if m["Level"] == "Primary"),
+                              member_metas[0] if member_metas else None)
+        out[long_name] = {
+            "Short": (r.get("ShortName") or "").strip()
+                     or (primary_member["Short"] if primary_member else ""),
+            "Region": (primary_member["Region"] if primary_member else ""),
+            "Level": (primary_member["Level"] if primary_member else ""),
+            "IsOfficial": primary_member["IsOfficial"] if primary_member else False,
+            "IsInternational": ("International" in regions)
+                               or long_name in _INTERNATIONAL_FALLBACK,
+        }
+
+    # leagues.csv에는 있고 group에는 없는 리그도 같은 이름으로 노출
+    for name, meta in leagues_by_name.items():
+        if name in out:
+            continue
+        out[name] = {**meta, "IsInternational": meta["Region"] == "International"
+                                                 or name in _INTERNATIONAL_FALLBACK}
+
+    # 그래도 못 잡힌 PLH 전용 이름은 fallback set으로만 international 여부 결정
+    return out
+
+
+def build_league_timeline_map():
+    """player_id -> {timeline: [...cells...], totals: {league: TotalGames}}.
+    국제 대회는 split을 분리하지 않음 (단기적 이벤트라 의미 없음)."""
+    try:
+        rows = read_csv(get_raw_file_path("player_league_history"))
+    except FileNotFoundError:
+        return {}
+
+    league_meta = build_league_meta_map()
+    by_player_cells = defaultdict(lambda: defaultdict(lambda: {"Splits": []}))
+    by_player_totals = defaultdict(dict)
+    skipped_no_year = 0
+
+    def _is_international(league):
+        meta = league_meta.get(league)
+        if meta is None:
+            return league in _INTERNATIONAL_FALLBACK
+        return meta["IsInternational"]
+
+    for r in rows:
+        player = r.get("Player") or ""
+        league = r.get("League") or ""
+        history = r.get("LeagueHistory") or ""
+        if not player or not league or not history:
+            continue
+        try:
+            total_games = int(r.get("TotalGames") or 0)
+        except ValueError:
+            total_games = 0
+        if total_games > 0:
+            by_player_totals[player][league] = total_games
+
+        intl = _is_international(league)
+        for chunk in history.split(";;;"):
+            if "::" not in chunk:
+                continue
+            page, team = chunk.split("::", 1)
+            page = page.strip()
+            team = team.strip()
+            year = _league_history_year(page)
+            if year is None:
+                skipped_no_year += 1
+                continue
+            cell_key = (year, league, team)
+            cell = by_player_cells[player][cell_key]
+            cell["Year"] = year
+            cell["League"] = league
+            cell["Team"] = team
+            if not intl:
+                cell["Splits"].append(_league_history_split(page))
+
+    if skipped_no_year:
+        print(f"PlayerLeagueHistory: skipped {skipped_no_year} entries without parseable year.")
+
+    result = {}
+    for player, cells in by_player_cells.items():
+        emitted = []
+        for (_, league, _), cell in cells.items():
+            meta = league_meta.get(league)
+            if meta is None:
+                meta = {
+                    "Short": "",
+                    "Region": "",
+                    "Level": "",
+                    "IsOfficial": False,
+                    "IsInternational": league in _INTERNATIONAL_FALLBACK,
+                }
+            emitted.append({
+                "Year": cell["Year"],
+                "League": league,
+                "LeagueShort": meta["Short"],
+                "Region": meta["Region"],
+                "Level": meta["Level"],
+                "IsInternational": meta["IsInternational"],
+                "Team": cell["Team"],
+                "Splits": cell["Splits"],
+            })
+        emitted.sort(key=lambda c: (
+            0 if c["IsInternational"] else 1,
+            c["League"],
+            c["Year"],
+        ))
+        result[player] = {
+            "timeline": emitted,
+            "totals": by_player_totals.get(player, {}),
+        }
+    return result
+
+
 def build_player_histories():
     players = read_csv(get_raw_file_path("players"))
     tenures = read_csv(get_raw_file_path("tenures"))
     roster_changes = read_csv(get_raw_file_path("roster_changes"))
     photo_by_player = build_latest_photo_map()
+    league_timeline_by_player = build_league_timeline_map()
 
     # player_id를 키로 하는 딕셔너리로 tenures와 roster_changes를 그룹화
     print("Grouping tenures and roster changes by player...")
@@ -113,9 +315,12 @@ def build_player_histories():
         roster_changes_for_player = roster_changes_by_player.get(player_id, [])
         player_history = build_player_history(tenures_for_player, roster_changes_for_player)
         player['LatestPhotoUrl'] = photo_by_player.get(player_id, '')
+        league_data = league_timeline_by_player.get(player_id) or {}
         player_info = {
             'Player': player,
-            'History': player_history
+            'History': player_history,
+            'LeagueTimeline': league_data.get('timeline', []),
+            'LeagueTotals': league_data.get('totals', {}),
         }
         player_infos.append(player_info)
         print(f"History built for player: {player_id}")

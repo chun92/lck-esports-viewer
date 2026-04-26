@@ -10,7 +10,11 @@
             "teams": "teams.csv",
             "team_renames": "team_renames.csv",
             "team_redirects": "team_redirects.csv",
-            "player_images": "player_images.csv"
+            "player_images": "player_images.csv",
+            "leagues": "leagues.csv",
+            "current_leagues": "current_leagues.csv",
+            "league_groups": "league_groups.csv",
+            "player_league_history": "player_league_history.csv"
         },
         "processed_data": {
             "data_directory": "processed",

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { CareerTimeline } from '@/components/CareerTimeline'
+import { LeagueTimeline } from '@/components/LeagueTimeline'
 import { PlayerHeader } from '@/components/PlayerHeader'
 import { TopBar } from '@/components/TopBar'
 import { ApiError, fetchPlayer } from '@/lib/api'
@@ -78,7 +79,7 @@ export function PlayerDetailPage() {
     )
   }
 
-  const { Player: meta, History } = status.data
+  const { Player: meta, History, LeagueTimeline: timeline, LeagueTotals: totals } = status.data
   const totalDays = History.reduce((acc, t) => acc + (resolveDuration(t) ?? 0), 0)
   const teamInfo = resolveTeamInfo(knownTeams, meta.Team)
 
@@ -90,6 +91,11 @@ export function PlayerDetailPage() {
           meta={meta}
           career={yearsMonths(totalDays)}
           teamInfo={teamInfo}
+        />
+        <LeagueTimeline
+          timeline={timeline ?? []}
+          totals={totals ?? {}}
+          knownTeams={knownTeams}
         />
         <CareerTimeline history={History} knownTeams={knownTeams} />
       </main>

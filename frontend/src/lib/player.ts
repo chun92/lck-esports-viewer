@@ -30,9 +30,22 @@ export interface Tenure {
   IsCurrent: string
 }
 
+export interface LeagueTimelineCell {
+  Year: number
+  League: string
+  LeagueShort: string
+  Region: string
+  Level: string
+  IsInternational: boolean
+  Team: string
+  Splits: string[]
+}
+
 export interface PlayerResponse {
   Player: PlayerMeta
   History: Tenure[]
+  LeagueTimeline: LeagueTimelineCell[]
+  LeagueTotals: Record<string, number>
 }
 
 export function fallback(v: string | null | undefined): string {

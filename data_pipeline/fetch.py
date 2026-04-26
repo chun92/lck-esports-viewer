@@ -143,6 +143,55 @@ def fetch_player_images(filters=None):
     return fetch_with_offset(batch_query_fn, "player_images")
 
 
+def fetch_leagues(filters=None):
+    batch_query_fn = lambda offset, limit: site.cargo_client.query(
+        tables="Leagues",
+        fields="League,League_Short,Region,Level,IsOfficial",
+        limit=limit,
+        offset=offset
+    )
+    return fetch_with_offset(batch_query_fn, "leagues")
+
+
+def fetch_current_leagues(filters=None):
+    batch_query_fn = lambda offset, limit: site.cargo_client.query(
+        tables="CurrentLeagues",
+        fields="Event,OverviewPage,Priority",
+        limit=limit,
+        offset=offset
+    )
+    return fetch_with_offset(batch_query_fn, "current_leagues")
+
+
+def fetch_league_groups(filters=None):
+    batch_query_fn = lambda offset, limit: site.cargo_client.query(
+        tables="LeagueGroups",
+        fields="LongName,ShortName,Leagues",
+        limit=limit,
+        offset=offset
+    )
+    return fetch_with_offset(batch_query_fn, "league_groups")
+
+
+def fetch_player_league_history(filters=None):
+    filters = filters or {}
+    country = filters.get("country")
+    conditions = []
+    if country:
+        conditions.append(f'P.Country="{country}"')
+    where_clause = " AND ".join(conditions) if conditions else None
+
+    batch_query_fn = lambda offset, limit: site.cargo_client.query(
+        tables="PlayerLeagueHistory=PLH, Players=P",
+        join_on="PLH.Player=P.Player",
+        fields="PLH.Player=Player, PLH.Teams=Teams, PLH.League=League, PLH.LeagueHistory=LeagueHistory, PLH.TotalGames=TotalGames",
+        where=where_clause,
+        limit=limit,
+        offset=offset
+    )
+    return fetch_with_offset(batch_query_fn, "player_league_history")
+
+
 def fetch_team_redirects(filters=None):
     batch_query_fn = lambda offset, limit: site.cargo_client.query(
         tables="TeamRedirects",
@@ -176,6 +225,8 @@ ALL_TABLES = [
     "players", "tenures", "roster_changes",
     "teams", "team_renames", "team_redirects",
     "player_images",
+    "leagues", "current_leagues", "league_groups",
+    "player_league_history",
 ]
 
 
@@ -223,6 +274,25 @@ def run_fetch(only=None, update_last_fetched=True):
         images = fetch_player_images(filters)
         upsert_csv(images, get_raw_file_path("player_images"),
                    key_fn=lambda r: f"{r.get('Link','')}_{r.get('FileName','')}")
+
+    if "leagues" in selected:
+        leagues = fetch_leagues()
+        upsert_csv(leagues, get_raw_file_path("leagues"), key_fn=lambda r: r['League'])
+
+    if "current_leagues" in selected:
+        cur = fetch_current_leagues()
+        upsert_csv(cur, get_raw_file_path("current_leagues"),
+                   key_fn=lambda r: f"{r.get('Event','')}_{r.get('OverviewPage','')}")
+
+    if "league_groups" in selected:
+        groups = fetch_league_groups()
+        upsert_csv(groups, get_raw_file_path("league_groups"),
+                   key_fn=lambda r: r.get('LongName','') or r.get('ShortName',''))
+
+    if "player_league_history" in selected:
+        plh = fetch_player_league_history(filters)
+        upsert_csv(plh, get_raw_file_path("player_league_history"),
+                   key_fn=lambda r: f"{r.get('Player','')}_{r.get('League','')}")
 
     if update_last_fetched and not only:
         set_last_fetched(start_time)
