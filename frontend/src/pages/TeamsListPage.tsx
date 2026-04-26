@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Pagination } from '@/components/Pagination'
+import { TopBar } from '@/components/TopBar'
 import { fetchTeams } from '@/lib/api'
 import type { TeamSummary } from '@/lib/team'
 
@@ -92,16 +93,10 @@ export function TeamsListPage() {
   const slice = sorted.slice(pageStart, pageStart + pageSize)
 
   return (
-    <main className="mx-auto max-w-[1200px] px-8 py-12">
-      <nav className="mb-4 flex items-center gap-4 text-[14px]">
-        <Link to="/players" className="text-text-muted hover:text-text-primary">
-          Players
-        </Link>
-        <Link to="/teams" className="font-semibold text-text-primary">
-          Teams
-        </Link>
-      </nav>
-      <h1 className="mb-6 text-[32px] font-bold">Teams</h1>
+    <>
+      <TopBar />
+      <main className="mx-auto max-w-[1200px] px-8 py-12">
+        <h1 className="mb-6 text-[32px] font-bold">Teams</h1>
 
       <div className="mb-4 flex flex-col gap-3 min-[640px]:flex-row min-[640px]:items-center">
         <input
@@ -207,7 +202,8 @@ export function TeamsListPage() {
           />
         </>
       )}
-    </main>
+      </main>
+    </>
   )
 }
 

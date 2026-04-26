@@ -6,6 +6,7 @@ import {
   type FilterState,
   type SearchField,
 } from '@/components/PlayerFilters'
+import { TopBar } from '@/components/TopBar'
 import { fetchPlayers, type PlayerListItem } from '@/lib/api'
 import { fallback } from '@/lib/player'
 
@@ -135,16 +136,10 @@ export function PlayersListPage() {
   const slice = sorted.slice(pageStart, pageStart + pageSize)
 
   return (
-    <main className="mx-auto max-w-[1200px] px-8 py-12">
-      <nav className="mb-4 flex items-center gap-4 text-[14px]">
-        <Link to="/players" className="font-semibold text-text-primary">
-          Players
-        </Link>
-        <Link to="/teams" className="text-text-muted hover:text-text-primary">
-          Teams
-        </Link>
-      </nav>
-      <h1 className="mb-6 text-[32px] font-bold">Players</h1>
+    <>
+      <TopBar />
+      <main className="mx-auto max-w-[1200px] px-8 py-12">
+        <h1 className="mb-6 text-[32px] font-bold">Players</h1>
 
       <PlayerFilters
         value={{ ...urlFilters, q: draftQ }}
@@ -243,7 +238,8 @@ export function PlayersListPage() {
           />
         </>
       )}
-    </main>
+      </main>
+    </>
   )
 }
 

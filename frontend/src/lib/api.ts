@@ -26,6 +26,7 @@ export interface PlayerListItem {
   PositionCategory: string
   IsActive: boolean
   Age: string
+  CareerDays: number
 }
 
 export async function fetchPlayer(

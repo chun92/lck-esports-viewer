@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { TeamHeader } from '@/components/TeamHeader'
 import { TeamHistoryTable } from '@/components/TeamHistoryTable'
 import { TeamRoster } from '@/components/TeamRoster'
+import { TopBar } from '@/components/TopBar'
 import { ApiError, fetchTeam } from '@/lib/api'
 import type { TeamResponse } from '@/lib/team'
 
@@ -38,27 +39,36 @@ export function TeamDetailPage() {
 
   if (status.kind === 'loading') {
     return (
-      <main className="mx-auto max-w-[1200px] px-8 py-12">
-        <p className="text-text-muted">Loading…</p>
-      </main>
+      <>
+        <TopBar />
+        <main className="mx-auto max-w-[1200px] px-8 py-12">
+          <p className="text-text-muted">Loading…</p>
+        </main>
+      </>
     )
   }
 
   if (status.kind === 'error') {
     return (
-      <main className="mx-auto max-w-[1200px] px-8 py-12">
-        <div className="rounded-[10px] border border-danger/[0.35] bg-danger/[0.12] p-6 text-danger">
-          {status.message}
-        </div>
-      </main>
+      <>
+        <TopBar />
+        <main className="mx-auto max-w-[1200px] px-8 py-12">
+          <div className="rounded-[10px] border border-danger/[0.35] bg-danger/[0.12] p-6 text-danger">
+            {status.message}
+          </div>
+        </main>
+      </>
     )
   }
 
   return (
-    <main className="mx-auto max-w-[1200px] px-8 py-12">
-      <TeamHeader team={status.data} />
-      <TeamRoster roster={status.data.CurrentRoster} />
-      <TeamHistoryTable history={status.data.PlayerHistory} />
-    </main>
+    <>
+      <TopBar />
+      <main className="mx-auto max-w-[1200px] px-8 py-12">
+        <TeamHeader team={status.data} />
+        <TeamRoster roster={status.data.CurrentRoster} />
+        <TeamHistoryTable history={status.data.PlayerHistory} />
+      </main>
+    </>
   )
 }

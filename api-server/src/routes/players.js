@@ -19,6 +19,25 @@ const listRows = parse(fs.readFileSync(listPath, 'utf-8'), {
     },
 })
 
+const careerDaysByPlayer = new Map()
+for (const entry of players) {
+    const key = entry.Player.Player
+    let total = 0
+    for (const t of entry.History) {
+        const n = Number(t.Duration)
+        if (!Number.isNaN(n) && n > 0) {
+            total += n
+            continue
+        }
+        const a = t.ApproximateDuration
+        if (typeof a === 'number' && a > 0) total += a
+    }
+    careerDaysByPlayer.set(key, total)
+}
+for (const row of listRows) {
+    row.CareerDays = careerDaysByPlayer.get(row.Player) ?? 0
+}
+
 router.get('/', (req, res) => {
     res.json(listRows)
 })

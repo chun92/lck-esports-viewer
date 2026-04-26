@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { CareerTimeline } from '@/components/CareerTimeline'
 import { PlayerHeader } from '@/components/PlayerHeader'
+import { TopBar } from '@/components/TopBar'
 import { ApiError, fetchPlayer } from '@/lib/api'
 import { loadKnownTeams, resolveTeamInfo, type TeamLinkMap } from '@/lib/knownTeams'
 import { resolveDuration, yearsMonths, type PlayerResponse } from '@/lib/player'
@@ -55,19 +56,25 @@ export function PlayerDetailPage() {
 
   if (status.kind === 'loading') {
     return (
-      <main className="mx-auto max-w-[1200px] px-8 py-12">
-        <p className="text-text-muted">Loading…</p>
-      </main>
+      <>
+        <TopBar />
+        <main className="mx-auto max-w-[1200px] px-8 py-12">
+          <p className="text-text-muted">Loading…</p>
+        </main>
+      </>
     )
   }
 
   if (status.kind === 'error') {
     return (
-      <main className="mx-auto max-w-[1200px] px-8 py-12">
-        <div className="rounded-[10px] border border-danger/[0.35] bg-danger/[0.12] p-6 text-danger">
-          {status.message}
-        </div>
-      </main>
+      <>
+        <TopBar />
+        <main className="mx-auto max-w-[1200px] px-8 py-12">
+          <div className="rounded-[10px] border border-danger/[0.35] bg-danger/[0.12] p-6 text-danger">
+            {status.message}
+          </div>
+        </main>
+      </>
     )
   }
 
@@ -76,13 +83,16 @@ export function PlayerDetailPage() {
   const teamInfo = resolveTeamInfo(knownTeams, meta.Team)
 
   return (
-    <main className="mx-auto max-w-[1200px] px-8 py-12">
-      <PlayerHeader
-        meta={meta}
-        career={yearsMonths(totalDays)}
-        teamInfo={teamInfo}
-      />
-      <CareerTimeline history={History} knownTeams={knownTeams} />
-    </main>
+    <>
+      <TopBar />
+      <main className="mx-auto max-w-[1200px] px-8 py-12">
+        <PlayerHeader
+          meta={meta}
+          career={yearsMonths(totalDays)}
+          teamInfo={teamInfo}
+        />
+        <CareerTimeline history={History} knownTeams={knownTeams} />
+      </main>
+    </>
   )
 }
