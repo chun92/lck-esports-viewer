@@ -46,34 +46,48 @@
 ## 6.5단계 — 피드백 + 추가 구현
 
 ### 피드백
-- [ ] Player 페이지 헤더: 현재 팀(이름 + 로고) / 포지션을 우측 badge가 아니라 이름 하단에 강조 표시
-- [ ] Player 페이지 Career Timeline: 팀 이름 옆에 팀 로고 표시
-- [ ] Team 페이지 Player History: Duration을 month → day 단위로 변경
+- [x] Player 페이지 헤더: 현재 팀(이름 + 로고) / 포지션을 이름 하단 강조 (b164264, 85c6c7c에서 pill 제거 + 텍스트 링크화)
+- [x] Player 페이지 Career Timeline: 팀 이름 옆에 팀 로고 표시 (b164264)
+- [x] Team 페이지 Player History: Duration을 month → day 단위로 변경 (b164264)
 
 ### 구현
-- [ ] Career Timeline의 팀 로고를 "당시 시점의 로고"로 표시
-  - 현재 Teams 정보에는 현재 이름의 로고만 존재
-  - 예: ShowMaker는 DAMWON → DWG KIA → Dplus KIA로 팀 이름이 바뀌면서 로고도 매번 달라졌음 (https://lol.fandom.com/wiki/ShowMaker 참고)
-  - rename 이전 시점에는 그 시점의 로고를 가져다 써야 함
-  - PoC 완료: `data_pipeline/poc_historical_logos.py` (own-name imageinfo + redirect/rename chain + case-insensitive). 237/449 resolve, 212 phantom drop, 44 era-mismatch limitation 후보 (limitations.json)
-  - 운용 시 보강 backlog:
-    - revision-pinned CDN URL 저장 (현재 `Special:FilePath`는 latest로 redirect 됨 → wiki File 덮어쓰기에 취약)
-    - `historical_logos.json` append-only 모드 (재실행 시 기존 key는 freeze, 신규만 resolve. `--rebuild` 시만 전체 재계산)
-    - limitations.json 기반 수동 override 매핑 (MiG Frost → MiGlogo, Fredit BRION → BRIONlogo, 각 Academy/Challengers 옛 이름 등)
-- [ ] Team 목록 페이지 (Players 목록 페이지처럼 탐색 가능하게)
+- [x] Career Timeline의 팀 로고를 "당시 시점의 로고"로 표시 (3834207)
+  - own-name imageinfo + redirect/rename chain + case-insensitive 해석
+  - 237/449 resolve, 212 phantom drop, 44 era-mismatch limitation 후보 (limitations.json)
+- [x] Team 목록 페이지 (895504b) — rename-aware 검색, FormerNames/Aliases 인덱싱
 
 ## 7단계 — 선수 사진 추가
-- [x] 사진 데이터 소스 확보 + 파이프라인 반영 (PlayerImages cargo, IsProfileImage=1)
-- [x] 선수 상세 헤더에 사진 노출 (PlayerHeader 좌측 120×120 thumbnail)
-- backlog
-  - [ ] Tournament 단위 다중 사진 노출 (시점별 photo gallery) — Tournaments 테이블 fetch 필요
-  - [ ] 사진 없는 선수에 placeholder 처리 일관화
-  - [ ] revision-pinned URL 캐싱 (Special:FilePath은 latest로 redirect)
+- [x] 사진 데이터 소스 확보 + 파이프라인 반영 (PlayerImages cargo, IsProfileImage=1) — 68be407
+- [x] 선수 상세 헤더에 사진 노출 (PlayerHeader 224×280 portrait, pill 제거) — 68be407, 85c6c7c
 
 ## 8단계 — 선수 시즌별 통계 페이지
-- [ ] 커리어/시즌별 플레이 정보
-- [ ] 승률
-- [ ] 사용 챔피언
+- [ ] 데이터 소스 확보: Cargo `ScoreboardPlayers` (게임 단위 KDA / champion / win), `ScoreboardGames` (메타), `TournamentPlayers` (시즌 매핑) fetch
+- [ ] 시즌(=Tournament 그룹) 단위 집계 파이프라인
+  - 게임 수, 승률, KDA 평균
+  - 사용 챔피언 top N + 픽률 / 승률
+  - 포지션 변화 추적 (시즌별)
+- [ ] 선수 상세 페이지에 "Season Stats" 탭 또는 섹션 추가
+- [ ] LCK 정규 시즌만 우선 (Spring / Summer / Cup), 국제전(Worlds/MSI)은 별도 표기
 
 ## 9단계 — 선수 비교 페이지
-- [ ] 선수별 커리어 기간 비교 UI
+- [ ] 라우트 `/compare?players=A,B,C`
+- [ ] 멀티 선수 선택 UI (선수 목록에서 체크박스 → 비교 보기)
+- [ ] 비교 항목
+  - 커리어 타임라인 가로 정렬 (같은 연도 축에 다중 선수)
+  - 시즌별 핵심 스탯 (승률 / KDA) 라인 차트
+  - 챔피언 풀 겹침
+- [ ] 최대 4명 제한 (UI 가독성)
+
+## 운용 / 인프라 backlog
+- [ ] historical_logos.json append-only 모드 (재실행 시 기존 key freeze, 신규만 resolve, `--rebuild` 시 전체 재계산)
+- [ ] limitations.json 기반 수동 override 매핑 (MiG Frost → MiGlogo, Fredit BRION → BRIONlogo, Academy/Challengers 옛 이름 등)
+- [ ] revision-pinned CDN URL 저장 — 팀 로고/선수 사진 모두 `Special:FilePath`이 latest로 redirect 되어 wiki File 덮어쓰기에 취약
+- [ ] Tournament 단위 다중 사진 gallery — Tournaments 테이블 fetch 필요
+- [ ] 사진/로고 없는 엔티티 placeholder 일관화 (현재 컴포넌트마다 다른 fallback)
+- [ ] data 갱신 자동화 — fetch.py 정기 실행 + transform.py 자동 cron / GitHub Actions
+- [ ] 추가 cargo 테이블: PlayerLeagueHistory (팀-리그 이력), TournamentResults (수상)
+
+## 데이터 품질 backlog
+- [ ] orphan team 정리 (`teams_orphan.json` 265건) — 수동 alias 매핑 또는 무시 정책 명문화
+- [ ] phantom team 케이스 재검증 — 단명 팀 / 아마추어 팀 분류
+- [ ] 선수 ID 충돌 케이스 (대소문자 변형 — `5Kid` vs `5kid` 등) 확인
