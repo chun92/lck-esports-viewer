@@ -9,7 +9,8 @@
             "player_redirects": "player_redirects.csv",
             "teams": "teams.csv",
             "team_renames": "team_renames.csv",
-            "team_redirects": "team_redirects.csv"
+            "team_redirects": "team_redirects.csv",
+            "player_images": "player_images.csv"
         },
         "processed_data": {
             "data_directory": "processed",

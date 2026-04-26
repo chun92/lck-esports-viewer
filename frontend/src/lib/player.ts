@@ -17,6 +17,7 @@ export interface PlayerMeta {
   RoleLast: string
   IsRetired: string
   Birthdate__precision: string
+  LatestPhotoUrl?: string
 }
 
 export interface Tenure {

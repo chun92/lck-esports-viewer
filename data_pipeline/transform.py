@@ -1,7 +1,9 @@
 import json
 import csv
+import re
 from collections import defaultdict
 from datetime import datetime
+from urllib.parse import quote
 
 from paths import get_raw_file_path, get_processed_file_path
 
@@ -75,6 +77,7 @@ def build_player_histories():
     players = read_csv(get_raw_file_path("players"))
     tenures = read_csv(get_raw_file_path("tenures"))
     roster_changes = read_csv(get_raw_file_path("roster_changes"))
+    photo_by_player = build_latest_photo_map()
 
     # player_id를 키로 하는 딕셔너리로 tenures와 roster_changes를 그룹화
     print("Grouping tenures and roster changes by player...")
@@ -109,6 +112,7 @@ def build_player_histories():
         tenures_for_player = tenures_by_player.get(player_id, [])
         roster_changes_for_player = roster_changes_by_player.get(player_id, [])
         player_history = build_player_history(tenures_for_player, roster_changes_for_player)
+        player['LatestPhotoUrl'] = photo_by_player.get(player_id, '')
         player_info = {
             'Player': player,
             'History': player_history
@@ -239,6 +243,45 @@ def _logo_url(image):
     if not image:
         return ""
     return f"https://lol.fandom.com/wiki/Special:FilePath/{image.replace(' ', '_')}"
+
+
+def _file_url(filename):
+    if not filename:
+        return ""
+    return f"https://lol.fandom.com/wiki/Special:FilePath/{quote(filename.replace(' ', '_'))}"
+
+
+_YEAR_RE = re.compile(r"(\d{4})")
+
+
+def _image_recency_key(row):
+    """Largest = most recent. (year, FileName) — FileName 'Split 2' > 'Split 1' lex order.
+    Year extracted from Tournament path (e.g. 'LCK/2026 Season/Cup' -> 2026)."""
+    tournament = row.get("Tournament") or ""
+    m = _YEAR_RE.search(tournament)
+    year = int(m.group(1)) if m else 0
+    return (year, row.get("FileName") or "")
+
+
+def build_latest_photo_map():
+    """Player -> latest profile image URL. Returns {} if file missing."""
+    try:
+        rows = read_csv(get_raw_file_path("player_images"))
+    except FileNotFoundError:
+        return {}
+    by_player = defaultdict(list)
+    for r in rows:
+        link = (r.get("Link") or "").strip()
+        if not link:
+            continue
+        by_player[link].append(r)
+    latest = {}
+    for player, imgs in by_player.items():
+        best = max(imgs, key=_image_recency_key)
+        filename = best.get("FileName") or ""
+        if filename:
+            latest[player] = _file_url(filename)
+    return latest
 
 
 def build_name_resolution(teams_by_op, teams_raw, extra_names=()):

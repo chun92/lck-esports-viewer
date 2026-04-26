@@ -63,8 +63,12 @@
 - [ ] Team 목록 페이지 (Players 목록 페이지처럼 탐색 가능하게)
 
 ## 7단계 — 선수 사진 추가
-- [ ] 사진 데이터 소스 확보 + 파이프라인 반영
-- [ ] 선수 상세 헤더에 사진 노출
+- [x] 사진 데이터 소스 확보 + 파이프라인 반영 (PlayerImages cargo, IsProfileImage=1)
+- [x] 선수 상세 헤더에 사진 노출 (PlayerHeader 좌측 120×120 thumbnail)
+- backlog
+  - [ ] Tournament 단위 다중 사진 노출 (시점별 photo gallery) — Tournaments 테이블 fetch 필요
+  - [ ] 사진 없는 선수에 placeholder 처리 일관화
+  - [ ] revision-pinned URL 캐싱 (Special:FilePath은 latest로 redirect)
 
 ## 8단계 — 선수 시즌별 통계 페이지
 - [ ] 커리어/시즌별 플레이 정보

@@ -16,7 +16,9 @@ export function PlayerHeader({ meta, career, teamInfo }: Props) {
 
   return (
     <section className="mb-12 flex flex-col items-start justify-between gap-8 border-b border-border pb-8 min-[900px]:flex-row">
-      <div className="min-w-0">
+      <div className="flex min-w-0 items-start gap-6">
+        {meta.LatestPhotoUrl && <PlayerPhoto url={meta.LatestPhotoUrl} alt={meta.ID} />}
+        <div className="min-w-0">
         <h1 className="m-0 text-[64px] font-extrabold leading-none tracking-[-0.02em]">
           {fallback(meta.ID)}
         </h1>
@@ -47,6 +49,7 @@ export function PlayerHeader({ meta, career, teamInfo }: Props) {
             )}
           </div>
         )}
+        </div>
       </div>
 
       <div className="flex flex-col items-start gap-3 min-[900px]:items-end">
@@ -66,6 +69,20 @@ export function PlayerHeader({ meta, career, teamInfo }: Props) {
         )}
       </div>
     </section>
+  )
+}
+
+function PlayerPhoto({ url, alt }: { url: string; alt: string }) {
+  const [broken, setBroken] = useState(false)
+  if (broken) return null
+  return (
+    <img
+      src={url}
+      alt={alt}
+      onError={() => setBroken(true)}
+      loading="lazy"
+      className="h-[120px] w-[120px] shrink-0 rounded-md border border-border bg-bg-base object-cover"
+    />
   )
 }
 

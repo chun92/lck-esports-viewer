@@ -124,6 +124,25 @@ def fetch_team_renames(filters=None):
     return fetch_with_offset(batch_query_fn, "team_renames")
 
 
+def fetch_player_images(filters=None):
+    filters = filters or {}
+    country = filters.get("country")
+    conditions = ['PI.IsProfileImage="1"']
+    if country:
+        conditions.append(f'P.Country="{country}"')
+    where_clause = " AND ".join(conditions)
+
+    batch_query_fn = lambda offset, limit: site.cargo_client.query(
+        tables="PlayerImages=PI, Players=P",
+        join_on="PI.Link=P.Player",
+        fields="PI.Link=Link, PI.FileName=FileName, PI.Caption=Caption, PI.Team=Team, PI.Tournament=Tournament, PI.SortDate=SortDate",
+        where=where_clause,
+        limit=limit,
+        offset=offset
+    )
+    return fetch_with_offset(batch_query_fn, "player_images")
+
+
 def fetch_team_redirects(filters=None):
     batch_query_fn = lambda offset, limit: site.cargo_client.query(
         tables="TeamRedirects",
@@ -156,6 +175,7 @@ def upsert_csv(new_data, file_path, key_fn):
 ALL_TABLES = [
     "players", "tenures", "roster_changes",
     "teams", "team_renames", "team_redirects",
+    "player_images",
 ]
 
 
@@ -198,6 +218,11 @@ def run_fetch(only=None, update_last_fetched=True):
         redirects = fetch_team_redirects()
         upsert_csv(redirects, get_raw_file_path("team_redirects"),
                    key_fn=lambda r: f"{r.get('PageName','')}_{r.get('AllName','')}")
+
+    if "player_images" in selected:
+        images = fetch_player_images(filters)
+        upsert_csv(images, get_raw_file_path("player_images"),
+                   key_fn=lambda r: f"{r.get('Link','')}_{r.get('FileName','')}")
 
     if update_last_fetched and not only:
         set_last_fetched(start_time)
