@@ -1,7 +1,11 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { resolveTeamInfo, type TeamLinkMap } from '@/lib/knownTeams'
-import type { LeagueTimelineCell } from '@/lib/player'
+import type {
+  LeagueClassification,
+  LeagueStage,
+  LeagueTimelineCell,
+} from '@/lib/player'
 
 interface Props {
   timeline: LeagueTimelineCell[]
@@ -13,6 +17,7 @@ interface RowGroup {
   league: string
   short: string
   level: string
+  classification: LeagueClassification
   isInternational: boolean
   totalGames: number
   cellsByYear: Map<number, LeagueTimelineCell[]>
@@ -26,8 +31,9 @@ export function LeagueTimeline({ timeline, totals, knownTeams }: Props) {
 
   if (rows.length === 0) return null
 
-  const intlRows = rows.filter((r) => r.isInternational)
-  const domesticRows = rows.filter((r) => !r.isInternational)
+  const intlRows = rows.filter((r) => r.classification === 'International')
+  const domesticRows = rows.filter((r) => r.classification === 'Domestic')
+  const eventRows = rows.filter((r) => r.classification === 'Events')
 
   return (
     <section className="mb-12">
@@ -51,6 +57,14 @@ export function LeagueTimeline({ timeline, totals, knownTeams }: Props) {
               knownTeams={knownTeams}
             />
           )}
+          {eventRows.length > 0 && (
+            <RowSection
+              label="Events"
+              rows={eventRows}
+              years={years}
+              knownTeams={knownTeams}
+            />
+          )}
         </div>
       </div>
       <SplitLegend />
@@ -59,13 +73,13 @@ export function LeagueTimeline({ timeline, totals, knownTeams }: Props) {
 }
 
 const LEGEND_ITEMS: Array<{ stripe: string; label: string }> = [
-  { stripe: 'border-l-emerald-500', label: 'Spring' },
-  { stripe: 'border-l-amber-500', label: 'Summer' },
-  { stripe: 'border-l-sky-400', label: 'Winter / Kickoff' },
+  { stripe: 'border-l-emerald-500', label: 'Spring / Rounds 1-2' },
+  { stripe: 'border-l-amber-500', label: 'Summer / Rounds 3-5' },
+  { stripe: 'border-l-sky-400', label: 'Winter / Kickoff / Cup' },
   { stripe: 'border-l-cyan-400', label: 'Split 1 / Opening' },
   { stripe: 'border-l-violet-400', label: 'Split 2 / Closing' },
-  { stripe: 'border-l-rose-400', label: 'Cup' },
-  { stripe: 'border-l-accent-gold', label: 'Championship / Intl' },
+  { stripe: 'border-l-fuchsia-400', label: 'Split 3' },
+  { stripe: 'border-l-accent-gold', label: 'Finals / Intl' },
 ]
 
 function SplitLegend() {
@@ -82,7 +96,11 @@ function SplitLegend() {
       ))}
       <span className="flex items-center gap-1.5">
         <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent-gold ring-1 ring-bg-surface" />
-        Playoffs / Finals
+        Playoffs
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className="inline-block h-3 w-3 rounded-[3px] border border-dashed border-accent-sky/60 bg-accent-sky/10 opacity-60" />
+        Unofficial
       </span>
     </div>
   )
@@ -143,12 +161,22 @@ interface LevelStyle {
   label: string
 }
 
-function levelStyle(level: string, isInternational: boolean): LevelStyle {
-  if (isInternational) {
+function levelStyle(
+  level: string,
+  classification: LeagueClassification
+): LevelStyle {
+  if (classification === 'International') {
     return {
       border: 'border-l-accent-gold',
       badge: 'bg-accent-gold/[0.18] text-accent-gold',
       label: 'INTL',
+    }
+  }
+  if (classification === 'Events') {
+    return {
+      border: 'border-l-text-muted',
+      badge: 'bg-text-muted/[0.18] text-text-muted',
+      label: 'EVENT',
     }
   }
   const norm = level.toLowerCase()
@@ -189,7 +217,7 @@ function TimelineRow({
   years: number[]
   knownTeams: TeamLinkMap | null
 }) {
-  const style = levelStyle(row.level, row.isInternational)
+  const style = levelStyle(row.level, row.classification)
   const primaryLabel = row.short || row.league
   const subLabel = row.short && row.short !== row.league ? row.league : ''
   return (
@@ -226,7 +254,7 @@ function TimelineRow({
             <YearCell
               key={y}
               cells={cells}
-              isInternational={row.isInternational}
+              classification={row.classification}
               knownTeams={knownTeams}
             />
           )
@@ -238,77 +266,85 @@ function TimelineRow({
 
 interface SplitChip {
   team: string
-  splitLabel: string
+  stage: LeagueStage | null
 }
 
 function expandCellsToChips(
   cells: LeagueTimelineCell[],
-  isInternational: boolean
+  classification: LeagueClassification
 ): SplitChip[] {
-  if (isInternational) {
-    return cells.map((c) => ({ team: c.Team, splitLabel: '' }))
+  // International은 cell 단위로 통합(여러 스테이지가 있어도 한 칩). 그 외는 stage별로 분리.
+  if (classification === 'International') {
+    return cells.map((c) => ({ team: c.Team, stage: null }))
   }
   const chips: SplitChip[] = []
   for (const c of cells) {
-    if (c.Splits.length === 0) {
-      chips.push({ team: c.Team, splitLabel: '' })
+    if (c.Stages.length === 0) {
+      chips.push({ team: c.Team, stage: null })
     } else {
-      for (const s of c.Splits) {
-        chips.push({ team: c.Team, splitLabel: s })
+      for (const s of c.Stages) {
+        chips.push({ team: c.Team, stage: s })
       }
     }
   }
   return chips
 }
 
-// 좌측 컬러 스트라이프로 split 시즌 구분. 색상=시즌 family, stage(정규/Playoffs)는 칩 우상단 인디케이터.
-// 2025+ LCK 포맷: Rounds 1-2 → Spring, Rounds 3-5 → Summer, Road to MSI → Spring PO, Season Playoffs → Summer PO.
-// LCK 내 split "Cup"은 실제 Cup이 아니라 시즌 오프닝 Kickoff 토너먼트.
-function splitStripeClass(label: string): string {
-  const s = label.toLowerCase().trim()
-  if (!s) return 'border-l-transparent'
-  if (s.includes('spring') || s.includes('rounds 1-2') || s.includes('road to msi'))
-    return 'border-l-emerald-500'
-  if (s.includes('summer') || s.includes('rounds 3-5') || s.includes('season playoffs') || s.includes('season play-in'))
-    return 'border-l-amber-500'
-  if (s.includes('winter') || s.includes('kickoff') || s === 'cup')
-    return 'border-l-sky-400'
-  if (s.includes('split 1') || s.includes('opening') || s.includes('1st championship'))
-    return 'border-l-cyan-400'
-  if (s.includes('split 2') || s.includes('closing') || s.includes('2nd championship'))
-    return 'border-l-violet-400'
-  if (s.includes('kespa') || s.includes('cup')) return 'border-l-rose-400'
-  if (s.includes('championship') || s.includes('finals')) return 'border-l-accent-gold'
-  if (s.includes('playoffs')) return 'border-l-fuchsia-400'
-  return 'border-l-text-muted/60'
-}
-
-function isPlayoffsStage(label: string): boolean {
-  const s = label.toLowerCase()
-  return /playoffs|finals|play-in|road to msi/.test(s)
+// Tournaments.Split 정규화 값 → 색상 family. exact match 위주로 단순화.
+// LCK 2025+ Rounds 1-2/3-5는 Tournaments.Split에 그대로 저장되므로 직접 매핑.
+// LCK의 Split="Cup"은 실제 Cup이 아닌 Kickoff 성격이라 Winter family로 묶음.
+function splitStripeClass(split: string): string {
+  switch (split) {
+    case 'Spring':
+    case 'Rounds 1-2':
+      return 'border-l-emerald-500'
+    case 'Summer':
+    case 'Rounds 3-5':
+    case 'Rounds 3-4':
+      return 'border-l-amber-500'
+    case 'Winter':
+    case 'Kickoff':
+    case 'Cup':
+      return 'border-l-sky-400'
+    case 'Split 1':
+    case 'Opening':
+    case 'Lock-In':
+      return 'border-l-cyan-400'
+    case 'Split 2':
+    case 'Closing':
+      return 'border-l-violet-400'
+    case 'Split 3':
+      return 'border-l-fuchsia-400'
+    case 'Finals':
+      return 'border-l-accent-gold'
+    case '':
+      return 'border-l-transparent'
+    default:
+      return 'border-l-text-muted/60'
+  }
 }
 
 function YearCell({
   cells,
-  isInternational,
+  classification,
   knownTeams,
 }: {
   cells: LeagueTimelineCell[]
-  isInternational: boolean
+  classification: LeagueClassification
   knownTeams: TeamLinkMap | null
 }) {
   if (cells.length === 0) {
     return <div className={`${YEAR_COL} shrink-0 border-l border-border`} />
   }
-  const chips = expandCellsToChips(cells, isInternational)
+  const chips = expandCellsToChips(cells, classification)
   return (
     <div className={`${YEAR_COL} shrink-0 border-l border-border p-1`}>
       <div className="flex h-full flex-col gap-0.5">
         {chips.map((chip, i) => (
           <CellChip
-            key={`${chip.team}-${chip.splitLabel}-${i}`}
+            key={`${chip.team}-${chip.stage?.Page ?? 'cell'}-${i}`}
             chip={chip}
-            isInternational={isInternational}
+            classification={classification}
             knownTeams={knownTeams}
           />
         ))}
@@ -319,31 +355,44 @@ function YearCell({
 
 function CellChip({
   chip,
-  isInternational,
+  classification,
   knownTeams,
 }: {
   chip: SplitChip
-  isInternational: boolean
+  classification: LeagueClassification
   knownTeams: TeamLinkMap | null
 }) {
   const [logoBroken, setLogoBroken] = useState(false)
   const info = resolveTeamInfo(knownTeams, chip.team)
-  const tooltip = chip.splitLabel
-    ? `${chip.team} · ${chip.splitLabel}`
-    : chip.team
+  const stage = chip.stage
+  const split = stage?.Split ?? ''
+  const isPlayoffs = stage?.IsPlayoffs ?? false
+  const isUnofficial = stage ? !stage.IsOfficial : false
+  const tooltipParts = [chip.team]
+  if (split) tooltipParts.push(split)
+  if (isPlayoffs) tooltipParts.push('Playoffs')
+  if (isUnofficial) tooltipParts.push('Unofficial')
+  const tooltip = tooltipParts.join(' · ')
 
-  const baseClass = isInternational
-    ? 'border-accent-gold/[0.4] bg-accent-gold/[0.12]'
-    : 'border-accent-sky/[0.35] bg-accent-sky/[0.10]'
-  const stripeClass = isInternational
-    ? 'border-l-4 border-l-accent-gold'
-    : `border-l-4 ${splitStripeClass(chip.splitLabel)}`
-  const showPlayoffsMark = !isInternational && isPlayoffsStage(chip.splitLabel)
+  const baseClass =
+    classification === 'International'
+      ? 'border-accent-gold/[0.4] bg-accent-gold/[0.12]'
+      : classification === 'Events'
+        ? 'border-text-muted/[0.35] bg-text-muted/[0.08]'
+        : 'border-accent-sky/[0.35] bg-accent-sky/[0.10]'
+  const stripeClass =
+    classification === 'International'
+      ? 'border-l-4 border-l-accent-gold'
+      : `border-l-4 ${splitStripeClass(split)}`
+  const unofficialClass = isUnofficial
+    ? 'border-dashed opacity-60'
+    : ''
+  const showPlayoffsMark = classification !== 'International' && isPlayoffs
 
   const inner = (
     <div
       title={tooltip}
-      className={`relative flex h-7 items-center justify-center rounded-[4px] border ${baseClass} ${stripeClass}`}
+      className={`relative flex h-7 items-center justify-center rounded-[4px] border ${baseClass} ${stripeClass} ${unofficialClass}`}
     >
       {showPlayoffsMark && (
         <span
@@ -380,6 +429,27 @@ function CellChip({
   return inner
 }
 
+const CLASS_PRIORITY: Record<LeagueClassification, number> = {
+  International: 0,
+  Domestic: 1,
+  Events: 2,
+}
+
+function rowClassification(cells: LeagueTimelineCell[]): LeagueClassification {
+  // 우선순위: 단일 cell이라도 International이면 row 전체를 International로,
+  // 그 다음 Domestic, 둘 다 없으면 Events.
+  let best: LeagueClassification = 'Events'
+  let bestPri = CLASS_PRIORITY.Events
+  for (const c of cells) {
+    const p = CLASS_PRIORITY[c.Classification]
+    if (p < bestPri) {
+      best = c.Classification
+      bestPri = p
+    }
+  }
+  return best
+}
+
 function buildRows(
   timeline: LeagueTimelineCell[],
   totals: Record<string, number>
@@ -390,25 +460,34 @@ function buildRows(
   if (timeline.length === 0) return { rows: [], years: [] }
 
   const yearsSet = new Set<number>()
-  const byLeague = new Map<string, RowGroup>()
+  const cellsByLeague = new Map<string, LeagueTimelineCell[]>()
 
   for (const cell of timeline) {
     yearsSet.add(cell.Year)
-    let row = byLeague.get(cell.League)
-    if (!row) {
-      row = {
-        league: cell.League,
-        short: cell.LeagueShort,
-        level: cell.Level,
-        isInternational: cell.IsInternational,
-        totalGames: totals[cell.League] ?? 0,
-        cellsByYear: new Map(),
-      }
-      byLeague.set(cell.League, row)
-    }
-    const list = row.cellsByYear.get(cell.Year) ?? []
+    const list = cellsByLeague.get(cell.League) ?? []
     list.push(cell)
-    row.cellsByYear.set(cell.Year, list)
+    cellsByLeague.set(cell.League, list)
+  }
+
+  const rows: RowGroup[] = []
+  for (const [league, cells] of cellsByLeague) {
+    const cls = rowClassification(cells)
+    const cellsByYear = new Map<number, LeagueTimelineCell[]>()
+    for (const c of cells) {
+      const list = cellsByYear.get(c.Year) ?? []
+      list.push(c)
+      cellsByYear.set(c.Year, list)
+    }
+    const sample = cells[0]
+    rows.push({
+      league,
+      short: sample.LeagueShort,
+      level: sample.Level,
+      classification: cls,
+      isInternational: cls === 'International',
+      totalGames: totals[league] ?? 0,
+      cellsByYear,
+    })
   }
 
   const minYear = Math.min(...yearsSet)
@@ -416,10 +495,10 @@ function buildRows(
   const years: number[] = []
   for (let y = minYear; y <= maxYear; y++) years.push(y)
 
-  const rows = Array.from(byLeague.values()).sort((a, b) => {
-    if (a.isInternational !== b.isInternational) {
-      return a.isInternational ? -1 : 1
-    }
+  rows.sort((a, b) => {
+    const pa = CLASS_PRIORITY[a.classification]
+    const pb = CLASS_PRIORITY[b.classification]
+    if (pa !== pb) return pa - pb
     return a.league.localeCompare(b.league)
   })
 

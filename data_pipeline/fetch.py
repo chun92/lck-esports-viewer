@@ -4,6 +4,7 @@ from datetime import datetime
 import argparse
 import csv
 import time
+import requests
 
 
 from paths import get_raw_file_path, get_last_fetched, set_last_fetched
@@ -12,20 +13,50 @@ credentials = AuthCredentials(user_file="me")
 site = EsportsClient('lol', credentials=credentials)
 
 
-def fetch_with_retry(query_fn, retries=5, backoff=60):
+# 재시도 대상 패턴: rate limit / 일시적 네트워크 / 서버 오류
+_RETRYABLE_KEYWORDS = (
+    "ratelimited",
+    "timed out", "timeout",
+    "connection", "connectionerror",
+    "maximum retries", "maximumretriesexceeded",
+    "temporarily unavailable",
+    "502", "503", "504",
+    "remote end closed",
+    "broken pipe",
+    "incomplete read",
+    "ssl",
+)
+
+
+def _classify_retryable(e):
+    """(retryable, kind) 반환. kind는 로그용 문자열."""
+    if isinstance(e, requests.exceptions.RequestException):
+        return True, type(e).__name__
+    s = str(e).lower()
+    if "ratelimited" in s:
+        return True, "rate-limit"
+    for kw in _RETRYABLE_KEYWORDS:
+        if kw in s:
+            return True, kw
+    return False, ""
+
+
+def fetch_with_retry(query_fn, retries=8, backoff=30):
+    last_err = None
     for attempt in range(retries):
         try:
             return query_fn()
         except Exception as e:
-            error_str = str(e)
-            if "ratelimited" in error_str:
-                wait = backoff * (attempt + 1)  # 60, 120, 180, 240, 300초
-                print(f"Rate limited. {wait}초 대기 후 재시도...")
-                time.sleep(wait)
-            else:
+            retryable, kind = _classify_retryable(e)
+            if not retryable:
                 raise
+            wait = backoff * (attempt + 1)  # 30, 60, 90, ... 240초
+            msg = str(e)[:200]
+            print(f"[retry {attempt + 1}/{retries}] {kind}: {msg} → {wait}초 대기")
+            time.sleep(wait)
+            last_err = e
 
-    raise Exception("All attempts failed")
+    raise Exception(f"All {retries} attempts failed (last error: {last_err!r})")
 
 
 def fetch_with_offset(query_fn, table_name):
@@ -192,6 +223,167 @@ def fetch_player_league_history(filters=None):
     return fetch_with_offset(batch_query_fn, "player_league_history")
 
 
+SCOREBOARD_PLAYERS_FIELDS = ",".join([
+    "SP.OverviewPage=OverviewPage",
+    "SP.Name=Name",
+    "SP.Link=Link",
+    "SP.Champion=Champion",
+    "SP.Kills=Kills",
+    "SP.Deaths=Deaths",
+    "SP.Assists=Assists",
+    "SP.SummonerSpells=SummonerSpells",
+    "SP.Gold=Gold",
+    "SP.CS=CS",
+    "SP.DamageToChampions=DamageToChampions",
+    "SP.VisionScore=VisionScore",
+    "SP.Items=Items",
+    "SP.RoleBoundItem=RoleBoundItem",
+    "SP.Trinket=Trinket",
+    "SP.Pentakills=Pentakills",
+    "SP.KeystoneMastery=KeystoneMastery",
+    "SP.KeystoneRune=KeystoneRune",
+    "SP.PrimaryTree=PrimaryTree",
+    "SP.SecondaryTree=SecondaryTree",
+    "SP.Runes=Runes",
+    "SP.TeamKills=TeamKills",
+    "SP.TeamGold=TeamGold",
+    "SP.Team=Team",
+    "SP.TeamVs=TeamVs",
+    "SP.Time=Time",
+    "SP.PlayerWin=PlayerWin",
+    "SP.DateTime_UTC=DateTime_UTC",
+    "SP.DST=DST",
+    "SP.Tournament=Tournament",
+    "SP.Role=Role",
+    "SP.Role_Number=Role_Number",
+    "SP.IngameRole=IngameRole",
+    "SP.Side=Side",
+    "SP.UniqueLine=UniqueLine",
+    "SP.UniqueLineVs=UniqueLineVs",
+    "SP.UniqueRole=UniqueRole",
+    "SP.UniqueRoleVs=UniqueRoleVs",
+    "SP.GameId=GameId",
+    "SP.MatchId=MatchId",
+    "SP.GameTeamId=GameTeamId",
+    "SP.GameRoleId=GameRoleId",
+    "SP.GameRoleIdVs=GameRoleIdVs",
+    "SP.StatsPage=StatsPage",
+])
+
+
+def fetch_scoreboard_players(filters=None):
+    """ScoreboardPlayers: 게임 단위 선수 스탯. 한국 선수만 필터링하더라도 수십만 건 단위.
+    DateTime_UTC ASC 정렬로 페이지네이션 안정성 확보, since_date로 증분 fetch 지원."""
+    filters = filters or {}
+    country = filters.get("country")
+    since_date = filters.get("since_date")
+    conditions = []
+    if country:
+        conditions.append(f'P.Country="{country}"')
+    if since_date:
+        conditions.append(f'SP.DateTime_UTC>="{since_date}"')
+    where_clause = " AND ".join(conditions) if conditions else None
+
+    batch_query_fn = lambda offset, limit: site.cargo_client.query(
+        tables="ScoreboardPlayers=SP, Players=P",
+        join_on="SP.Link=P.Player",
+        fields=SCOREBOARD_PLAYERS_FIELDS,
+        where=where_clause,
+        order_by="SP.DateTime_UTC ASC, SP.GameRoleId ASC",
+        limit=limit,
+        offset=offset,
+    )
+    return fetch_with_offset(batch_query_fn, "scoreboard_players")
+
+
+TOURNAMENTS_FIELDS = ",".join([
+    "T.Name=Name",
+    "T.OverviewPage=OverviewPage",
+    "T.DateStart=DateStart",
+    "T.Date=Date",
+    "T.DateStartFuzzy=DateStartFuzzy",
+    "T.League=League",
+    "T.Region=Region",
+    "T.Prizepool=Prizepool",
+    "T.Currency=Currency",
+    "T.Country=Country",
+    "T.ClosestTimezone=ClosestTimezone",
+    "T.Rulebook=Rulebook",
+    "T.EventType=EventType",
+    "T.Links=Links",
+    "T.Sponsors=Sponsors",
+    "T.Organizer=Organizer",
+    "T.Organizers=Organizers",
+    "T.StandardName=StandardName",
+    "T.StandardName_Redirect=StandardName_Redirect",
+    "T.BasePage=BasePage",
+    "T.Split=Split",
+    "T.SplitNumber=SplitNumber",
+    "T.SplitMainPage=SplitMainPage",
+    "T.TournamentLevel=TournamentLevel",
+    "T.IsQualifier=IsQualifier",
+    "T.IsPlayoffs=IsPlayoffs",
+    "T.IsOfficial=IsOfficial",
+    "T.Year=Year",
+    "T.LeagueIconKey=LeagueIconKey",
+    "T.AlternativeNames=AlternativeNames",
+    "T.ScrapeLink=ScrapeLink",
+    "T.Tags=Tags",
+    "T.SuppressTopSchedule=SuppressTopSchedule",
+])
+
+
+def fetch_tournaments(filters=None):
+    """Tournaments: 토너먼트 메타(이름, 일정, 리그, 상금, 공식 여부 등). 별도 player 필터 없이 전역 fetch.
+    since_date가 있으면 T.Date(종료일) 이후만 가져와 메타 업데이트 증분."""
+    filters = filters or {}
+    since_date = filters.get("since_date")
+    where_clause = f'T.Date>="{since_date}"' if since_date else None
+
+    batch_query_fn = lambda offset, limit: site.cargo_client.query(
+        tables="Tournaments=T",
+        fields=TOURNAMENTS_FIELDS,
+        where=where_clause,
+        order_by="T.DateStart ASC, T.OverviewPage ASC",
+        limit=limit,
+        offset=offset,
+    )
+    return fetch_with_offset(batch_query_fn, "tournaments")
+
+
+def fetch_tournament_players(filters=None):
+    """TournamentPlayers: 토너먼트 페이지 단위 선수 로스터 등록. 한국 선수만 필터링하더라도 수만 건.
+    PLH가 잡지 못하는 미출전(예정) 등록과 단발성 이벤트(쇼매치/올스타/Cup)까지 포함."""
+    filters = filters or {}
+    country = filters.get("country")
+    where_clause = f'P.Country="{country}"' if country else None
+    batch_query_fn = lambda offset, limit: site.cargo_client.query(
+        tables="TournamentPlayers=TP, Players=P",
+        join_on="TP.Link=P.Player",
+        fields="TP.Team=Team, TP.N_PlayerInTeam=N_PlayerInTeam, TP.TeamOrder=TeamOrder, "
+               "TP.Link=Link, TP.Player=Player, TP.Role=Role, TP.Flag=Flag, "
+               "TP.Footnote=Footnote, TP.OverviewPage=OverviewPage, "
+               "TP.PageAndTeam=PageAndTeam, TP.IsDistribution=IsDistribution",
+        where=where_clause,
+        order_by="TP.OverviewPage ASC, TP.TeamOrder ASC, TP.N_PlayerInTeam ASC",
+        limit=limit,
+        offset=offset,
+    )
+    return fetch_with_offset(batch_query_fn, "tournament_players")
+
+
+def fetch_tournament_groups(filters=None):
+    """TournamentGroups: 토너먼트 내 그룹(조) 정보. Team x Tournament(=OverviewPage) 단위."""
+    batch_query_fn = lambda offset, limit: site.cargo_client.query(
+        tables="TournamentGroups",
+        fields="Team,OverviewPage,GroupName,GroupDisplay,GroupN,PageAndTeam",
+        order_by="OverviewPage ASC, GroupN ASC, Team ASC",
+        limit=limit,
+        offset=offset,
+    )
+    return fetch_with_offset(batch_query_fn, "tournament_groups")
+
+
 def fetch_team_redirects(filters=None):
     batch_query_fn = lambda offset, limit: site.cargo_client.query(
         tables="TeamRedirects",
@@ -227,17 +419,24 @@ ALL_TABLES = [
     "player_images",
     "leagues", "current_leagues", "league_groups",
     "player_league_history",
+    "scoreboard_players",
+    "tournaments",
+    "tournament_groups",
+    "tournament_players",
 ]
 
+# 기본 fetch 묶음에서는 제외(수십만~수백만 행 단위라 명시적으로 --only로 호출).
+HEAVY_TABLES = {"scoreboard_players", "tournament_players"}
 
-def run_fetch(only=None, update_last_fetched=True):
-    selected = set(only) if only else set(ALL_TABLES)
+
+def run_fetch(only=None, update_last_fetched=True, full=False):
+    selected = set(only) if only else (set(ALL_TABLES) - HEAVY_TABLES)
     unknown = selected - set(ALL_TABLES)
     if unknown:
         raise SystemExit(f"Unknown tables: {sorted(unknown)}. Valid: {ALL_TABLES}")
 
-    fetched_time = get_last_fetched()
-    print(f"Last fetched time: {fetched_time}")
+    fetched_time = None if full else get_last_fetched()
+    print(f"Last fetched time: {fetched_time}{' (full backfill)' if full else ''}")
     country = "South Korea"
     filters = {"country": country, "since_date": fetched_time}
     start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -294,6 +493,29 @@ def run_fetch(only=None, update_last_fetched=True):
         upsert_csv(plh, get_raw_file_path("player_league_history"),
                    key_fn=lambda r: f"{r.get('Player','')}_{r.get('League','')}")
 
+    if "scoreboard_players" in selected:
+        sb = fetch_scoreboard_players(filters)
+        upsert_csv(sb, get_raw_file_path("scoreboard_players"),
+                   key_fn=lambda r: r.get('GameRoleId','')
+                                    or f"{r.get('GameId','')}_{r.get('Link','')}")
+
+    if "tournaments" in selected:
+        tours = fetch_tournaments(filters)
+        upsert_csv(tours, get_raw_file_path("tournaments"),
+                   key_fn=lambda r: r.get('OverviewPage','') or r.get('Name',''))
+
+    if "tournament_groups" in selected:
+        groups = fetch_tournament_groups()
+        upsert_csv(groups, get_raw_file_path("tournament_groups"),
+                   key_fn=lambda r: r.get('PageAndTeam','')
+                                    or f"{r.get('OverviewPage','')}_{r.get('GroupN','')}_{r.get('Team','')}")
+
+    if "tournament_players" in selected:
+        tps = fetch_tournament_players(filters)
+        upsert_csv(tps, get_raw_file_path("tournament_players"),
+                   key_fn=lambda r: f"{r.get('PageAndTeam','')}_{r.get('Link','')}_{r.get('Role','')}"
+                                    or f"{r.get('OverviewPage','')}_{r.get('Team','')}_{r.get('Link','')}")
+
     if update_last_fetched and not only:
         set_last_fetched(start_time)
     print(f"Data fetched at: {get_last_fetched()}")
@@ -303,5 +525,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Fetch Leaguepedia data")
     parser.add_argument("--only", nargs="+", choices=ALL_TABLES,
                         help="Fetch only specified tables (default: all)")
+    parser.add_argument("--full", action="store_true",
+                        help="Ignore last_fetched and pull full history (for first-time backfill)")
     args = parser.parse_args()
-    run_fetch(only=args.only)
+    run_fetch(only=args.only, full=args.full)

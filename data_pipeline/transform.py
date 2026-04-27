@@ -103,7 +103,33 @@ def _load_year_overrides():
 _PLH_OVERRIDE_PAIRS = _load_year_overrides()
 
 
-def _league_history_year(overview_page):
+def _load_tournaments_meta():
+    """OverviewPage -> {Year, Split, IsPlayoffs, IsOfficial, TournamentLevel, Region, League}.
+    페이지 단위 메타. 빈 필드는 빈 문자열/False."""
+    try:
+        rows = read_csv(get_raw_file_path("tournaments"))
+    except FileNotFoundError:
+        return {}
+    out = {}
+    for r in rows:
+        op = (r.get("OverviewPage") or "").strip()
+        if not op:
+            continue
+        out[op] = {
+            "Year": (r.get("Year") or "").strip(),
+            "Split": (r.get("Split") or "").strip(),
+            # IsPlayoffs/IsOfficial: "1"=true, "0"=false. IsOfficial 빈값은 official로 간주.
+            "IsPlayoffs": (r.get("IsPlayoffs") or "").strip() == "1",
+            "IsOfficial": (r.get("IsOfficial") or "").strip() != "0",
+            "TournamentLevel": (r.get("TournamentLevel") or "").strip(),
+            "Region": (r.get("Region") or "").strip(),
+            "League": (r.get("League") or "").strip(),
+        }
+    return out
+
+
+def _league_history_year_heuristic(overview_page):
+    """레거시 fallback: page 문자열에서 연도 추출 (Tournaments.Year가 비었을 때만 사용)."""
     m = _PLH_YEAR_RE.search(overview_page)
     if m:
         return int(m.group(1))
@@ -116,23 +142,39 @@ def _league_history_year(overview_page):
     return None
 
 
-def _league_history_split(overview_page):
-    """OverviewPage에서 표시용 split 라벨 추출. 마지막 '/' 뒷부분, 없으면 페이지 전체."""
-    parts = overview_page.split("/")
-    return parts[-1] if len(parts) > 1 else overview_page
+def _resolve_year(page, tour_meta):
+    """Tournaments.Year 우선, 빈값일 때만 휴리스틱+manual override fallback."""
+    t = tour_meta.get(page)
+    if t and t["Year"].isdigit():
+        return int(t["Year"])
+    return _league_history_year_heuristic(page)
 
 
-# PlayerLeagueHistory에 등장하지만 leagues.csv/LeagueGroups에서 안 잡히는 국제전 보강
-_INTERNATIONAL_FALLBACK = {
-    "World Championship", "Mid-Season Invitational", "Esports World Cup",
-    "Rift Rivals", "All-Star", "First Stand",
-}
+def _build_intl_leagues_from_tour(plh_rows, tour_meta):
+    """PLH.League별로 매칭되는 Tournaments.Region에 'International'이 하나라도 있으면 international 리그로 간주.
+    World Championship/MSI/Rift Rivals/EWC/First Stand 등 자동 감지."""
+    intl = set()
+    for r in plh_rows:
+        league = (r.get("League") or "").strip()
+        if not league or league in intl:
+            continue
+        history = r.get("LeagueHistory") or ""
+        for chunk in history.split(";;;"):
+            if "::" not in chunk:
+                continue
+            page = chunk.split("::", 1)[0].strip()
+            t = tour_meta.get(page)
+            if t and t["Region"] == "International":
+                intl.add(league)
+                break
+    return intl
 
 
-def build_league_meta_map():
+def build_league_meta_map(extra_intl_leagues=None):
     """PlayerLeagueHistory.League 이름 → {Short, Region, Level, IsOfficial, IsInternational}.
     PLH의 League는 LeagueGroups.LongName과 매칭되므로 그쪽을 우선 조회하고,
-    멤버 League 중 하나라도 Region=International이면 그룹을 International로 표기."""
+    멤버 League 중 하나라도 Region=International이거나 extra_intl_leagues에 포함되면 international 표기."""
+    extra_intl = set(extra_intl_leagues or ())
     try:
         leagues_rows = read_csv(get_raw_file_path("leagues"))
     except FileNotFoundError:
@@ -161,7 +203,6 @@ def build_league_meta_map():
         members = [m.strip() for m in (r.get("Leagues") or "").split(",") if m.strip()]
         member_metas = [leagues_by_name[m] for m in members if m in leagues_by_name]
         regions = {m["Region"] for m in member_metas if m["Region"]}
-        levels = {m["Level"] for m in member_metas if m["Level"]}
         primary_member = next((m for m in member_metas if m["Level"] == "Primary"),
                               member_metas[0] if member_metas else None)
         out[long_name] = {
@@ -170,79 +211,175 @@ def build_league_meta_map():
             "Region": (primary_member["Region"] if primary_member else ""),
             "Level": (primary_member["Level"] if primary_member else ""),
             "IsOfficial": primary_member["IsOfficial"] if primary_member else False,
-            "IsInternational": ("International" in regions)
-                               or long_name in _INTERNATIONAL_FALLBACK,
+            "IsInternational": ("International" in regions) or long_name in extra_intl,
         }
 
     # leagues.csv에는 있고 group에는 없는 리그도 같은 이름으로 노출
     for name, meta in leagues_by_name.items():
         if name in out:
             continue
-        out[name] = {**meta, "IsInternational": meta["Region"] == "International"
-                                                 or name in _INTERNATIONAL_FALLBACK}
+        out[name] = {
+            **meta,
+            "IsInternational": meta["Region"] == "International" or name in extra_intl,
+        }
 
-    # 그래도 못 잡힌 PLH 전용 이름은 fallback set으로만 international 여부 결정
     return out
+
+
+_SHOWMATCH_TEAM_RE = re.compile(
+    r"\(.*(?:All-?Star|All Star|Season Opening|Showmatch|AS\s|Exhibit|Charity).*\)",
+    re.IGNORECASE,
+)
+_PSEUDO_LEAGUE_YEAR_RE = re.compile(r"\b(?:20\d{2}|Season \d+)\b")
+
+
+def _classify_tournament(meta, team_name):
+    """Tournaments meta + team 이름으로 International/Domestic/Events 분류.
+    - Region=International → International
+    - IsOfficial=False(=='0') → Events
+    - TournamentLevel in {Showmatch, Minor, Major, Qualifier, Premier} → Events
+    - TournamentLevel 빈값 → Events (구버전 exhibition류)
+    - 합성 쇼매치 팀명(괄호 + All-Star/Season Opening 등) → Events
+    - else → Domestic"""
+    if not meta:
+        return "Events"
+    if meta.get("Region") == "International":
+        return "International"
+    if not meta.get("IsOfficial", True):
+        return "Events"
+    level = meta.get("TournamentLevel", "")
+    if level in {"Showmatch", "Minor", "Major", "Qualifier", "Premier"}:
+        return "Events"
+    if level == "":
+        return "Events"
+    if team_name and _SHOWMATCH_TEAM_RE.search(team_name):
+        return "Events"
+    return "Domestic"
+
+
+def _build_tour_to_canonical_league():
+    """Tournaments.League raw 값 → LeagueGroups.LongName 캐노니컬 이름.
+    OGN/LoL The Champions/LoL Champions Korea → 'LoL Champions Korea'로 통합."""
+    try:
+        groups = read_csv(get_raw_file_path("league_groups"))
+    except FileNotFoundError:
+        return {}
+    out = {}
+    for g in groups:
+        long_name = (g.get("LongName") or "").strip()
+        if not long_name:
+            continue
+        for member in (g.get("Leagues") or "").split(","):
+            m = member.strip()
+            if m:
+                out[m] = long_name
+    return out
+
+
+def _league_from_page(page):
+    """tour.League가 빈 경우 OverviewPage에서 연도 토큰 제거하여 pseudo-league 명 추출.
+    'LCK 2024 Season Opening' → 'LCK Season Opening'."""
+    p = _PSEUDO_LEAGUE_YEAR_RE.sub("", page).strip()
+    # 연도 제거 후 남는 ' /', '/ ', 다중 공백 정리
+    p = re.sub(r"\s*/\s*", "/", p)
+    p = re.sub(r"\s+", " ", p)
+    p = p.strip(" /")
+    return p or page
+
+
+def _resolve_league_name(page, meta, raw_to_canonical):
+    """대회 페이지로부터 표시할 league 이름 결정. tour.League가 비면 page에서 합성."""
+    raw_league = (meta or {}).get("League", "") if meta else ""
+    if not raw_league and meta is None:
+        # Tournaments에 행이 없는 페이지 — page-derived
+        return _league_from_page(page)
+    if raw_league:
+        return raw_to_canonical.get(raw_league, raw_league)
+    return _league_from_page(page)
 
 
 def build_league_timeline_map():
     """player_id -> {timeline: [...cells...], totals: {league: TotalGames}}.
-    국제 대회는 split을 분리하지 않음 (단기적 이벤트라 의미 없음)."""
+    소스 = TournamentPlayers (페이지 단위 로스터 등록), Tournaments meta로 join.
+    PLH는 TotalGames 집계용으로만 부수적으로 사용."""
+    tour_meta = _load_tournaments_meta()
+    raw_to_canonical = _build_tour_to_canonical_league()
     try:
-        rows = read_csv(get_raw_file_path("player_league_history"))
+        plh_rows = read_csv(get_raw_file_path("player_league_history"))
     except FileNotFoundError:
-        return {}
+        plh_rows = []
+    intl_dynamic = _build_intl_leagues_from_tour(plh_rows, tour_meta)
+    league_meta = build_league_meta_map(extra_intl_leagues=intl_dynamic)
 
-    league_meta = build_league_meta_map()
-    by_player_cells = defaultdict(lambda: defaultdict(lambda: {"Splits": []}))
-    by_player_totals = defaultdict(dict)
-    skipped_no_year = 0
-
-    def _is_international(league):
-        meta = league_meta.get(league)
-        if meta is None:
-            return league in _INTERNATIONAL_FALLBACK
-        return meta["IsInternational"]
-
-    for r in rows:
+    # PLH로부터 TotalGames만 추출 (League 단위)
+    totals_by_player = defaultdict(dict)
+    for r in plh_rows:
         player = r.get("Player") or ""
         league = r.get("League") or ""
-        history = r.get("LeagueHistory") or ""
-        if not player or not league or not history:
+        if not player or not league:
             continue
         try:
-            total_games = int(r.get("TotalGames") or 0)
+            n = int(r.get("TotalGames") or 0)
         except ValueError:
-            total_games = 0
-        if total_games > 0:
-            by_player_totals[player][league] = total_games
+            n = 0
+        if n > 0:
+            totals_by_player[player][league] = n
 
-        intl = _is_international(league)
-        for chunk in history.split(";;;"):
-            if "::" not in chunk:
-                continue
-            page, team = chunk.split("::", 1)
-            page = page.strip()
-            team = team.strip()
-            year = _league_history_year(page)
-            if year is None:
-                skipped_no_year += 1
-                continue
-            cell_key = (year, league, team)
-            cell = by_player_cells[player][cell_key]
-            cell["Year"] = year
-            cell["League"] = league
-            cell["Team"] = team
-            if not intl:
-                cell["Splits"].append(_league_history_split(page))
+    try:
+        tp_rows = read_csv(get_raw_file_path("tournament_players"))
+    except FileNotFoundError:
+        tp_rows = []
+
+    by_player_cells = defaultdict(lambda: defaultdict(lambda: {"Stages": [], "Classifications": set()}))
+    skipped_no_year = 0
+
+    for tp in tp_rows:
+        player = (tp.get("Link") or "").strip()
+        page = (tp.get("OverviewPage") or "").strip()
+        team = (tp.get("Team") or "").strip()
+        if not player or not page or not team:
+            continue
+        meta = tour_meta.get(page)
+        year = _resolve_year(page, tour_meta)
+        if year is None:
+            skipped_no_year += 1
+            continue
+        league = _resolve_league_name(page, meta, raw_to_canonical)
+        classification = _classify_tournament(meta, team)
+        cell = by_player_cells[player][(year, league, team)]
+        cell["Year"] = year
+        cell["League"] = league
+        cell["Team"] = team
+        cell["Classifications"].add(classification)
+        m = meta or {}
+        cell["Stages"].append({
+            "Page": page,
+            "Split": m.get("Split", ""),
+            "IsPlayoffs": m.get("IsPlayoffs", False),
+            "IsOfficial": m.get("IsOfficial", True),
+            "TournamentLevel": m.get("TournamentLevel", ""),
+            "Role": (tp.get("Role") or "").strip(),
+        })
 
     if skipped_no_year:
-        print(f"PlayerLeagueHistory: skipped {skipped_no_year} entries without parseable year.")
+        print(f"TournamentPlayers: skipped {skipped_no_year} entries without parseable year.")
+
+    def _cell_classification(classes, league):
+        # 리그 메타가 international이면 그쪽이 우선 (regional qualifier가 host 국가 region을 가져도 Worlds로 묶음)
+        meta = league_meta.get(league)
+        if meta and meta["IsInternational"]:
+            return "International"
+        if "International" in classes:
+            return "International"
+        if "Domestic" in classes:
+            return "Domestic"
+        return "Events"
 
     result = {}
     for player, cells in by_player_cells.items():
         emitted = []
         for (_, league, _), cell in cells.items():
+            cls = _cell_classification(cell["Classifications"], league)
             meta = league_meta.get(league)
             if meta is None:
                 meta = {
@@ -250,7 +387,7 @@ def build_league_timeline_map():
                     "Region": "",
                     "Level": "",
                     "IsOfficial": False,
-                    "IsInternational": league in _INTERNATIONAL_FALLBACK,
+                    "IsInternational": cls == "International",
                 }
             emitted.append({
                 "Year": cell["Year"],
@@ -258,18 +395,17 @@ def build_league_timeline_map():
                 "LeagueShort": meta["Short"],
                 "Region": meta["Region"],
                 "Level": meta["Level"],
-                "IsInternational": meta["IsInternational"],
+                "IsInternational": cls == "International",
+                "Classification": cls,
                 "Team": cell["Team"],
-                "Splits": cell["Splits"],
+                "Stages": cell["Stages"],
             })
-        emitted.sort(key=lambda c: (
-            0 if c["IsInternational"] else 1,
-            c["League"],
-            c["Year"],
-        ))
+        # 정렬 우선순위: International > Domestic > Events, 그 안에서는 league 이름, 연도
+        cls_order = {"International": 0, "Domestic": 1, "Events": 2}
+        emitted.sort(key=lambda c: (cls_order[c["Classification"]], c["League"], c["Year"]))
         result[player] = {
             "timeline": emitted,
-            "totals": by_player_totals.get(player, {}),
+            "totals": totals_by_player.get(player, {}),
         }
     return result
 

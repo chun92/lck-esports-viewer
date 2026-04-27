@@ -30,6 +30,17 @@ export interface Tenure {
   IsCurrent: string
 }
 
+export interface LeagueStage {
+  Page: string
+  Split: string
+  IsPlayoffs: boolean
+  IsOfficial: boolean
+  TournamentLevel: string
+  Role: string
+}
+
+export type LeagueClassification = 'International' | 'Domestic' | 'Events'
+
 export interface LeagueTimelineCell {
   Year: number
   League: string
@@ -37,8 +48,9 @@ export interface LeagueTimelineCell {
   Region: string
   Level: string
   IsInternational: boolean
+  Classification: LeagueClassification
   Team: string
-  Splits: string[]
+  Stages: LeagueStage[]
 }
 
 export interface PlayerResponse {

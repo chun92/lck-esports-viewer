@@ -14,7 +14,11 @@
             "leagues": "leagues.csv",
             "current_leagues": "current_leagues.csv",
             "league_groups": "league_groups.csv",
-            "player_league_history": "player_league_history.csv"
+            "player_league_history": "player_league_history.csv",
+            "scoreboard_players": "scoreboard_players.csv",
+            "tournaments": "tournaments.csv",
+            "tournament_groups": "tournament_groups.csv",
+            "tournament_players": "tournament_players.csv"
         },
         "processed_data": {
             "data_directory": "processed",

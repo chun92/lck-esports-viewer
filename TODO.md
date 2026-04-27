@@ -9,7 +9,14 @@
 - [x] `data-pipeline/fetch.py` — Leaguepedia API 연동
 - [x] LCK 팀 목록 / 선수 목록 호출
 - [x] 원본 csv 저장
-- [ ] 추후 PlayerLeagueHistory, ScoreboardGames, ScoreboardPlayers, ScoreboardTeams, TournamentPlayers 등을 가져올 수 있을 듯.
+- [x] PlayerLeagueHistory fetch
+- [x] ScoreboardPlayers fetch (HEAVY, KR 191k+ rows)
+- [x] Tournaments fetch (10k+ rows)
+- [x] TournamentGroups fetch (12k rows)
+- [x] TournamentPlayers fetch (KR 21k rows)
+- [x] fetch_with_retry 강화 (8 retries, 30s linear backoff, 광범위 transient 에러 매칭)
+- [x] `--full` CLI 플래그 (since_date 무시 백필)
+- [ ] ScoreboardGames / ScoreboardTeams / TournamentResults 등 추가
 
 ## 2단계 — Python: 데이터 가공
 - [x] `data_pipeline/transform.py` — 필드 추출/정제, 선수 이력 조립
@@ -60,8 +67,20 @@
 - [x] 사진 데이터 소스 확보 + 파이프라인 반영 (PlayerImages cargo, IsProfileImage=1) — 68be407
 - [x] 선수 상세 헤더에 사진 노출 (PlayerHeader 224×280 portrait, pill 제거) — 68be407, 85c6c7c
 
-## 8단계 — 선수 시즌별 통계 페이지
-- [ ] 데이터 소스 확보: Cargo `ScoreboardPlayers` (게임 단위 KDA / champion / win), `ScoreboardGames` (메타), `TournamentPlayers` (시즌 매핑) fetch
+## 8단계 — Season Overview 강화 + 시즌별 통계
+### Season Overview 리팩토링 (완료)
+- [x] Tournaments table 기반으로 LeagueTimeline 재구성: Year/Split/IsPlayoffs/IsOfficial/TournamentLevel을 페이지 단위 직접 사용
+- [x] 휴리스틱 split 파싱 제거 → `Tournaments.Split` exact-value 매핑 (Spring/Summer/Rounds 1-2/Cup 등)
+- [x] `_INTERNATIONAL_FALLBACK` 정적 set 제거 → Tournaments.Region='International' 자동 감지
+- [x] TournamentPlayers를 LeagueTimeline 메인 소스로 교체 (PLH는 TotalGames만 부수적 사용)
+  - 미출전 등록(예: Scout LCK 2026) 자동 표시
+  - 단발성 이벤트(Demacia/Weibo/All-Star) 표시
+- [x] International / Domestic / Events 3-bucket 분류
+  - 합성 쇼매치 팀 정규식(`(.*All-Star.*)`, `(Season Opening)`) 검출
+  - 리그 레벨 international 우선 (regional Worlds qualifier가 host 국가 region이어도 Worlds로 묶음)
+- [x] frontend: Events 섹션 + EVENT 배지/muted chip 스타일
+
+### 시즌별 통계
 - [ ] 시즌(=Tournament 그룹) 단위 집계 파이프라인
   - 게임 수, 승률, KDA 평균
   - 사용 챔피언 top N + 픽률 / 승률
@@ -93,7 +112,11 @@
 - [ ] 선수 ID 충돌 케이스 (대소문자 변형 — `5Kid` vs `5kid` 등) 확인
 
 ## Season Overview backlog
-- [ ] LCK 외 다른 리그(LPL/LEC/LCS/LCK CL/Academy 등)의 split 라벨 → season family 매핑 정합성 검증
-  - 현재 `splitStripeClass`는 LCK 기준으로 튜닝됨 (Rounds 1-2/3-5, Road to MSI, Season Playoffs, "Cup" → Kickoff 등)
-  - 다른 리그의 고유 split 명칭(예: LPL Regular Season, LEC Winter/Spring/Summer 포맷, LCS Lock In 등)이 잘못된 family로 분류될 가능성
-  - `data/raw/player_league_history.csv`에서 리그별 unique split 라벨 추출 후 케이스별 매핑 정의
+- [ ] `splitStripeClass`의 추가 split 값 보강 — 현재 Tournaments.Split exact-value 매칭이라 신규/희귀 라벨은 회색 fallback
+  - 알려진 값: Spring, Summer, Winter, Rounds 1-2/3-5/3-4, Split 1/2/3, Opening, Closing, Cup, Kickoff, Lock-In, Finals
+  - 누락 가능성 있는 값: 'Versus' (LEC), 'Summer Placements'/'Split 2 Placements' (LPL), 그 외 지역별 명칭
+- [ ] All-Star Las Vegas 같은 sub-page tournament들이 별도 league row로 분산되는 문제
+  - 현재 'All-Star Las Vegas/Mixed Team', 'All-Star Las Vegas/East vs West' 등이 각자 league로 잡힘
+  - 부모 페이지로 묶거나 BasePage 필드 활용 검토
+- [ ] year_overrides.csv의 잔여 4건 manual 매핑 (Bloody Invitational/Ultraliga 일부/NA LCS Season 3)
+- [ ] KeSPA Cup Year=시즌 연도 정책 검증 (Tournaments.Year 신뢰)
