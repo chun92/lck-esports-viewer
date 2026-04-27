@@ -1,7 +1,7 @@
 import json
 import csv
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
@@ -298,6 +298,57 @@ def _resolve_league_name(page, meta, raw_to_canonical):
     return _league_from_page(page)
 
 
+# Worlds/MSI 본선 vs 지역 진출전 구분용. League는 'World Championship'/'MSI'이지만
+# Region이 host country라면 진출전(qualifier) — 본선 라인이 아니라 출신 리그 stage로 재배치.
+_INTL_QUALIFIER_LEAGUES = {
+    "World Championship",
+    "Mid-Season Invitational",
+    "First Stand",
+}
+
+
+def _is_intl_qualifier(meta):
+    if not meta:
+        return False
+    league = meta.get("League", "")
+    region = meta.get("Region", "")
+    return league in _INTL_QUALIFIER_LEAGUES and region not in ("", "International")
+
+
+def _redirect_qualifier_league(page, year, tour_meta, raw_to_canonical):
+    """진출전 페이지를 같은 시즌의 출신 리그명으로 재매핑.
+    예: 'LCK/2018 Season/Regional Finals' → 'LCK/2018 Season/' 형제 페이지의 League → 'LoL Champions Korea'.
+    슬래시 없는 옛 형식('2014 Season Korea Regional Finals')은 year+region 매칭으로 fallback.
+    출신 리그를 못 찾으면 None 반환 (이 경우 호출측에서 원래 매핑 유지)."""
+    raw_candidates = []
+    if "/" in page:
+        prefix = page.rsplit("/", 1)[0] + "/"
+        for op, m in tour_meta.items():
+            if op == page or not op.startswith(prefix):
+                continue
+            lg = (m.get("League") or "").strip()
+            if lg and m.get("Region") != "International" and lg not in _INTL_QUALIFIER_LEAGUES:
+                raw_candidates.append(lg)
+    if not raw_candidates:
+        target = tour_meta.get(page, {})
+        region = target.get("Region", "")
+        if region:
+            for op, m in tour_meta.items():
+                if op == page:
+                    continue
+                if str(m.get("Year", "")) != str(year):
+                    continue
+                if m.get("Region") != region:
+                    continue
+                lg = (m.get("League") or "").strip()
+                if lg and lg not in _INTL_QUALIFIER_LEAGUES:
+                    raw_candidates.append(lg)
+    if not raw_candidates:
+        return None
+    canon_counts = Counter(raw_to_canonical.get(c, c) for c in raw_candidates)
+    return canon_counts.most_common(1)[0][0]
+
+
 def build_league_timeline_map():
     """player_id -> {timeline: [...cells...], totals: {league: TotalGames}}.
     소스 = TournamentPlayers (페이지 단위 로스터 등록), Tournaments meta로 join.
@@ -345,6 +396,11 @@ def build_league_timeline_map():
             skipped_no_year += 1
             continue
         league = _resolve_league_name(page, meta, raw_to_canonical)
+        # Worlds/MSI 진출전은 본선 라인이 아니라 출신 리그의 stage로 재배치
+        if _is_intl_qualifier(meta):
+            redirected = _redirect_qualifier_league(page, year, tour_meta, raw_to_canonical)
+            if redirected:
+                league = redirected
         classification = _classify_tournament(meta, team)
         cell = by_player_cells[player][(year, league, team)]
         cell["Year"] = year
