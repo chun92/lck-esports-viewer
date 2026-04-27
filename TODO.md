@@ -91,3 +91,9 @@
 - [ ] orphan team 정리 (`teams_orphan.json` 265건) — 수동 alias 매핑 또는 무시 정책 명문화
 - [ ] phantom team 케이스 재검증 — 단명 팀 / 아마추어 팀 분류
 - [ ] 선수 ID 충돌 케이스 (대소문자 변형 — `5Kid` vs `5kid` 등) 확인
+
+## Season Overview backlog
+- [ ] LCK 외 다른 리그(LPL/LEC/LCS/LCK CL/Academy 등)의 split 라벨 → season family 매핑 정합성 검증
+  - 현재 `splitStripeClass`는 LCK 기준으로 튜닝됨 (Rounds 1-2/3-5, Road to MSI, Season Playoffs, "Cup" → Kickoff 등)
+  - 다른 리그의 고유 split 명칭(예: LPL Regular Season, LEC Winter/Spring/Summer 포맷, LCS Lock In 등)이 잘못된 family로 분류될 가능성
+  - `data/raw/player_league_history.csv`에서 리그별 unique split 라벨 추출 후 케이스별 매핑 정의
