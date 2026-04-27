@@ -150,23 +150,55 @@ def _resolve_year(page, tour_meta):
     return _league_history_year_heuristic(page)
 
 
+# 진출전 reroute 대상 (메인 라인이 있고 지역 진출전이 따로 페이지로 분리된 리그).
+_QUALIFIER_PARENT_LEAGUES = {
+    "World Championship",
+    "Mid-Season Invitational",
+    "First Stand",
+    "Esports World Cup",
+}
+
+
+def _is_intl_canonical_league(canonical):
+    """canonical 리그명(LongName 또는 leagues.csv name)을 받아 International 분류 여부 판단.
+    포함: Worlds/MSI/FST/EWC + Rift Rivals + Mid-Season Cup + Asian Games(연도별) + SEA Games."""
+    if not canonical:
+        return False
+    if canonical in {
+        "World Championship",
+        "Mid-Season Invitational",
+        "First Stand",
+        "Esports World Cup",
+        "Rift Rivals",
+        "Southeast Asian Games",
+    }:
+        return True
+    if canonical.startswith("Mid-Season Cup"):
+        return True
+    if canonical.startswith("Asian Games") or canonical.startswith("Road to Asian Games"):
+        return True
+    if canonical.startswith("SEA Games"):
+        return True
+    return False
+
+
 def _build_intl_leagues_from_tour(plh_rows, tour_meta):
-    """PLH.League별로 매칭되는 Tournaments.Region에 'International'이 하나라도 있으면 international 리그로 간주.
-    World Championship/MSI/Rift Rivals/EWC/First Stand 등 자동 감지."""
+    """League 카탈로그(leagues.csv ∪ league_groups.csv)에서 _is_intl_canonical_league를 만족하는 이름 집합."""
     intl = set()
-    for r in plh_rows:
-        league = (r.get("League") or "").strip()
-        if not league or league in intl:
-            continue
-        history = r.get("LeagueHistory") or ""
-        for chunk in history.split(";;;"):
-            if "::" not in chunk:
-                continue
-            page = chunk.split("::", 1)[0].strip()
-            t = tour_meta.get(page)
-            if t and t["Region"] == "International":
-                intl.add(league)
-                break
+    try:
+        for r in read_csv(get_raw_file_path("leagues")):
+            n = (r.get("League") or "").strip()
+            if _is_intl_canonical_league(n):
+                intl.add(n)
+    except FileNotFoundError:
+        pass
+    try:
+        for r in read_csv(get_raw_file_path("league_groups")):
+            n = (r.get("LongName") or "").strip()
+            if _is_intl_canonical_league(n):
+                intl.add(n)
+    except FileNotFoundError:
+        pass
     return intl
 
 
@@ -202,7 +234,6 @@ def build_league_meta_map(extra_intl_leagues=None):
             continue
         members = [m.strip() for m in (r.get("Leagues") or "").split(",") if m.strip()]
         member_metas = [leagues_by_name[m] for m in members if m in leagues_by_name]
-        regions = {m["Region"] for m in member_metas if m["Region"]}
         primary_member = next((m for m in member_metas if m["Level"] == "Primary"),
                               member_metas[0] if member_metas else None)
         out[long_name] = {
@@ -211,7 +242,9 @@ def build_league_meta_map(extra_intl_leagues=None):
             "Region": (primary_member["Region"] if primary_member else ""),
             "Level": (primary_member["Level"] if primary_member else ""),
             "IsOfficial": primary_member["IsOfficial"] if primary_member else False,
-            "IsInternational": ("International" in regions) or long_name in extra_intl,
+            # IsInternational은 _is_intl_canonical_league 카탈로그(extra_intl)에 한해 True.
+            # region=International인 일회성 쇼매치(All-Star, Red Bull League, 2023 Season Kickoff 등)는 제외.
+            "IsInternational": long_name in extra_intl,
         }
 
     # leagues.csv에는 있고 group에는 없는 리그도 같은 이름으로 노출
@@ -220,7 +253,7 @@ def build_league_meta_map(extra_intl_leagues=None):
             continue
         out[name] = {
             **meta,
-            "IsInternational": meta["Region"] == "International" or name in extra_intl,
+            "IsInternational": name in extra_intl,
         }
 
     return out
@@ -233,28 +266,82 @@ _SHOWMATCH_TEAM_RE = re.compile(
 _PSEUDO_LEAGUE_YEAR_RE = re.compile(r"\b(?:20\d{2}|Season \d+)\b")
 
 
-def _classify_tournament(meta, team_name):
+_DOMESTIC_LEVELS = {"Primary", "Secondary", "Tertiary", "Developmental"}
+
+# Split 정렬 우선순위. Tournaments.Split exact value 기준.
+# 정규 시즌(Spring/Summer/Winter) → 분기형(Split 1/2/3) → 컵/킥오프 → 진출전/파이널.
+_SPLIT_RANK = {
+    "": 0,
+    "Kickoff": 1,
+    "Cup": 2,
+    "Lock-In": 3,
+    "Opening": 4,
+    "Spring": 10,
+    "Rounds 1-2": 11,
+    "Split 1": 12,
+    "Summer": 20,
+    "Rounds 3-5": 21,
+    "Rounds 3-4": 21,
+    "Split 2": 22,
+    "Closing": 23,
+    "Winter": 30,
+    "Split 3": 31,
+    "Regional Finals": 80,
+    "Finals": 90,
+}
+
+
+def _build_canonical_leagues_set():
+    """leagues.csv ∪ league_groups.csv 멤버 = '리그 카탈로그에 등록된 정식 리그' 집합.
+    여기 없는 raw league(=Season 2023 Kickoff, T1 Home Ground 등)는 일회성 이벤트로 간주."""
+    out = set()
+    try:
+        for r in read_csv(get_raw_file_path("leagues")):
+            n = (r.get("League") or "").strip()
+            if n:
+                out.add(n)
+    except FileNotFoundError:
+        pass
+    try:
+        for r in read_csv(get_raw_file_path("league_groups")):
+            for m in (r.get("Leagues") or "").split(","):
+                m = m.strip()
+                if m:
+                    out.add(m)
+    except FileNotFoundError:
+        pass
+    return out
+
+
+def _classify_tournament(meta, team_name, canonical_leagues, raw_to_canonical):
     """Tournaments meta + team 이름으로 International/Domestic/Events 분류.
-    - Region=International → International
-    - IsOfficial=False(=='0') → Events
-    - TournamentLevel in {Showmatch, Minor, Major, Qualifier, Premier} → Events
-    - TournamentLevel 빈값 → Events (구버전 exhibition류)
-    - 합성 쇼매치 팀명(괄호 + All-Star/Season Opening 등) → Events
-    - else → Domestic"""
+    우선순위:
+      1) TournamentLevel=Showmatch → Events
+      2) 합성 쇼매치 팀명(괄호 + All-Star/Season Opening 등) → Events
+      3) canonical(raw→LongName) ∈ International 카탈로그 → International
+         (Worlds/MSI/FST/EWC, Rift Rivals, Mid-Season Cup, Asian Games, SEA Games)
+      4) league_raw가 leagues.csv/league_groups에 없음 → Events
+         (Season 2023 Kickoff / T1 Home Ground 같은 일회성)
+      5) Region!=International이고 Level이 정상 도메스틱 티어 → Domestic
+         (KeSPA Cup처럼 IsOfficial=No여도 Level=Primary면 Domestic으로 인정)
+      6) 그 외 → Events"""
     if not meta:
         return "Events"
-    if meta.get("Region") == "International":
-        return "International"
-    if not meta.get("IsOfficial", True):
-        return "Events"
     level = meta.get("TournamentLevel", "")
-    if level in {"Showmatch", "Minor", "Major", "Qualifier", "Premier"}:
-        return "Events"
-    if level == "":
+    if level == "Showmatch":
         return "Events"
     if team_name and _SHOWMATCH_TEAM_RE.search(team_name):
         return "Events"
-    return "Domestic"
+    league_raw = meta.get("League", "")
+    canonical = raw_to_canonical.get(league_raw, league_raw)
+    if _is_intl_canonical_league(canonical):
+        return "International"
+    if not league_raw or league_raw not in canonical_leagues:
+        return "Events"
+    region = meta.get("Region", "")
+    if region and region != "International" and level in _DOMESTIC_LEVELS:
+        return "Domestic"
+    return "Events"
 
 
 def _build_tour_to_canonical_league():
@@ -300,19 +387,12 @@ def _resolve_league_name(page, meta, raw_to_canonical):
 
 # Worlds/MSI 본선 vs 지역 진출전 구분용. League는 'World Championship'/'MSI'이지만
 # Region이 host country라면 진출전(qualifier) — 본선 라인이 아니라 출신 리그 stage로 재배치.
-_INTL_QUALIFIER_LEAGUES = {
-    "World Championship",
-    "Mid-Season Invitational",
-    "First Stand",
-}
-
-
 def _is_intl_qualifier(meta):
     if not meta:
         return False
     league = meta.get("League", "")
     region = meta.get("Region", "")
-    return league in _INTL_QUALIFIER_LEAGUES and region not in ("", "International")
+    return league in _QUALIFIER_PARENT_LEAGUES and region not in ("", "International")
 
 
 def _redirect_qualifier_league(page, year, tour_meta, raw_to_canonical):
@@ -327,7 +407,7 @@ def _redirect_qualifier_league(page, year, tour_meta, raw_to_canonical):
             if op == page or not op.startswith(prefix):
                 continue
             lg = (m.get("League") or "").strip()
-            if lg and m.get("Region") != "International" and lg not in _INTL_QUALIFIER_LEAGUES:
+            if lg and m.get("Region") != "International" and lg not in _QUALIFIER_PARENT_LEAGUES:
                 raw_candidates.append(lg)
     if not raw_candidates:
         target = tour_meta.get(page, {})
@@ -341,7 +421,7 @@ def _redirect_qualifier_league(page, year, tour_meta, raw_to_canonical):
                 if m.get("Region") != region:
                     continue
                 lg = (m.get("League") or "").strip()
-                if lg and lg not in _INTL_QUALIFIER_LEAGUES:
+                if lg and lg not in _QUALIFIER_PARENT_LEAGUES:
                     raw_candidates.append(lg)
     if not raw_candidates:
         return None
@@ -355,6 +435,7 @@ def build_league_timeline_map():
     PLH는 TotalGames 집계용으로만 부수적으로 사용."""
     tour_meta = _load_tournaments_meta()
     raw_to_canonical = _build_tour_to_canonical_league()
+    canonical_leagues = _build_canonical_leagues_set()
     try:
         plh_rows = read_csv(get_raw_file_path("player_league_history"))
     except FileNotFoundError:
@@ -362,19 +443,33 @@ def build_league_timeline_map():
     intl_dynamic = _build_intl_leagues_from_tour(plh_rows, tour_meta)
     league_meta = build_league_meta_map(extra_intl_leagues=intl_dynamic)
 
-    # PLH로부터 TotalGames만 추출 (League 단위)
+    # PLH로부터 TotalGames + page 순서 추출.
+    # plh_page_rank[(player, league, page)] = 해당 선수의 PLH 행 내 등장 순서.
+    # cell stage 정렬 1차 키. league 단위로 분리하지 않으면 PLH 행 처리 순서에 따라
+    # 다른 리그의 페이지(예: WCS Regional Finals)가 cell의 자체 split보다 앞서 정렬되는 버그 발생.
     totals_by_player = defaultdict(dict)
+    plh_page_rank = {}
     for r in plh_rows:
         player = r.get("Player") or ""
         league = r.get("League") or ""
-        if not player or not league:
-            continue
-        try:
-            n = int(r.get("TotalGames") or 0)
-        except ValueError:
-            n = 0
-        if n > 0:
-            totals_by_player[player][league] = n
+        history = r.get("LeagueHistory") or ""
+        if player and league:
+            try:
+                n = int(r.get("TotalGames") or 0)
+            except ValueError:
+                n = 0
+            if n > 0:
+                totals_by_player[player][league] = n
+        if player and league and history:
+            idx = 0
+            for chunk in history.split(";;;"):
+                page = chunk.split("::", 1)[0].strip()
+                if not page:
+                    continue
+                key = (player, league, page)
+                if key not in plh_page_rank:
+                    plh_page_rank[key] = idx
+                    idx += 1
 
     try:
         tp_rows = read_csv(get_raw_file_path("tournament_players"))
@@ -396,24 +491,32 @@ def build_league_timeline_map():
             skipped_no_year += 1
             continue
         league = _resolve_league_name(page, meta, raw_to_canonical)
-        # Worlds/MSI 진출전은 본선 라인이 아니라 출신 리그의 stage로 재배치
+        classification = _classify_tournament(meta, team, canonical_leagues, raw_to_canonical)
+        m = meta or {}
+        split = m.get("Split", "")
+        is_playoffs = m.get("IsPlayoffs", False)
+        # Worlds/MSI 진출전은 본선 라인이 아니라 출신 리그의 stage로 재배치 (Domestic으로 재분류).
+        # Split이 비어있는 옛 진출전 페이지엔 'Regional Finals' 라벨 + playoff 스타일 부여.
         if _is_intl_qualifier(meta):
             redirected = _redirect_qualifier_league(page, year, tour_meta, raw_to_canonical)
             if redirected:
                 league = redirected
-        classification = _classify_tournament(meta, team)
+                classification = "Domestic"
+                if not split:
+                    split = "Regional Finals"
+                is_playoffs = True
         cell = by_player_cells[player][(year, league, team)]
         cell["Year"] = year
         cell["League"] = league
         cell["Team"] = team
         cell["Classifications"].add(classification)
-        m = meta or {}
         cell["Stages"].append({
             "Page": page,
-            "Split": m.get("Split", ""),
-            "IsPlayoffs": m.get("IsPlayoffs", False),
+            "Split": split,
+            "IsPlayoffs": is_playoffs,
             "IsOfficial": m.get("IsOfficial", True),
             "TournamentLevel": m.get("TournamentLevel", ""),
+            "Classification": classification,
             "Role": (tp.get("Role") or "").strip(),
         })
 
@@ -421,10 +524,7 @@ def build_league_timeline_map():
         print(f"TournamentPlayers: skipped {skipped_no_year} entries without parseable year.")
 
     def _cell_classification(classes, league):
-        # 리그 메타가 international이면 그쪽이 우선 (regional qualifier가 host 국가 region을 가져도 Worlds로 묶음)
-        meta = league_meta.get(league)
-        if meta and meta["IsInternational"]:
-            return "International"
+        # classifier가 stage별로 이미 명확히 분류했으므로 우선순위 합산만 수행.
         if "International" in classes:
             return "International"
         if "Domestic" in classes:
@@ -445,6 +545,29 @@ def build_league_timeline_map():
                     "IsOfficial": False,
                     "IsInternational": cls == "International",
                 }
+            # Stage 정렬:
+            #   1) PLH 등장 순서 (있으면) — Tournaments.DateStart에 부합하는 진행 순서를 보존.
+            #      OGN 시절 Winter Season(전년 11월 시작)이 같은 calendar Year 셀에서 Spring보다 먼저 표시됨.
+            #   2) PLH에 없으면 _SPLIT_RANK 폴백 → 정규(IsPlayoffs=False) → playoff → page 이름.
+            # cell.classification과 다른 분류의 stage(예: LCK 셀에 끼어든 Showmatch)는 제외.
+            stages = [s for s in cell["Stages"] if s.get("Classification", cls) == cls]
+
+            def _stage_sort_key(s, _player=player, _league=league):
+                page = s.get("Page", "")
+                # cell의 home 리그 PLH에 있는 페이지가 1순위. 다른 리그 출신(예: WCS에서
+                # 재배치된 Regional Finals)은 PLH 미발견으로 처리 → _SPLIT_RANK fallback에서
+                # Regional Finals=80이 부여되어 시즌 split 뒤로 정렬됨.
+                rank = plh_page_rank.get((_player, _league, page))
+                if rank is not None:
+                    return (0, rank, 0, page)
+                return (
+                    1,
+                    _SPLIT_RANK.get(s.get("Split", ""), 99),
+                    1 if s.get("IsPlayoffs") else 0,
+                    page,
+                )
+
+            stages.sort(key=_stage_sort_key)
             emitted.append({
                 "Year": cell["Year"],
                 "League": league,
@@ -454,7 +577,7 @@ def build_league_timeline_map():
                 "IsInternational": cls == "International",
                 "Classification": cls,
                 "Team": cell["Team"],
-                "Stages": cell["Stages"],
+                "Stages": stages,
             })
         # 정렬 우선순위: International > Domestic > Events, 그 안에서는 league 이름, 연도
         cls_order = {"International": 0, "Domestic": 1, "Events": 2}

@@ -92,12 +92,12 @@ export function PlayerDetailPage() {
           career={yearsMonths(totalDays)}
           teamInfo={teamInfo}
         />
+        <CareerTimeline history={History} knownTeams={knownTeams} />
         <LeagueTimeline
           timeline={timeline ?? []}
           totals={totals ?? {}}
           knownTeams={knownTeams}
         />
-        <CareerTimeline history={History} knownTeams={knownTeams} />
       </main>
     </>
   )

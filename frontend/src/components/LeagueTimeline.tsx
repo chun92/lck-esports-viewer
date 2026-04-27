@@ -35,6 +35,15 @@ export function LeagueTimeline({ timeline, totals, knownTeams }: Props) {
   const domesticRows = rows.filter((r) => r.classification === 'Domestic')
   const eventRows = rows.filter((r) => r.classification === 'Events')
 
+  // Events는 기본 fold, 나머지는 펼침.
+  const [openSections, setOpenSections] = useState<Record<LeagueClassification, boolean>>({
+    International: true,
+    Domestic: true,
+    Events: false,
+  })
+  const toggle = (k: LeagueClassification) =>
+    setOpenSections((s) => ({ ...s, [k]: !s[k] }))
+
   return (
     <section className="mb-12">
       <h2 className="mb-5 text-[24px] font-bold tracking-tight">Season Overview</h2>
@@ -47,6 +56,8 @@ export function LeagueTimeline({ timeline, totals, knownTeams }: Props) {
               rows={intlRows}
               years={years}
               knownTeams={knownTeams}
+              open={openSections.International}
+              onToggle={() => toggle('International')}
             />
           )}
           {domesticRows.length > 0 && (
@@ -55,6 +66,8 @@ export function LeagueTimeline({ timeline, totals, knownTeams }: Props) {
               rows={domesticRows}
               years={years}
               knownTeams={knownTeams}
+              open={openSections.Domestic}
+              onToggle={() => toggle('Domestic')}
             />
           )}
           {eventRows.length > 0 && (
@@ -63,6 +76,8 @@ export function LeagueTimeline({ timeline, totals, knownTeams }: Props) {
               rows={eventRows}
               years={years}
               knownTeams={knownTeams}
+              open={openSections.Events}
+              onToggle={() => toggle('Events')}
             />
           )}
         </div>
@@ -132,25 +147,47 @@ function RowSection({
   rows,
   years,
   knownTeams,
+  open,
+  onToggle,
 }: {
   label: string
   rows: RowGroup[]
   years: number[]
   knownTeams: TeamLinkMap | null
+  open: boolean
+  onToggle: () => void
 }) {
   return (
     <>
-      <div className="flex border-b border-border bg-bg-base/30 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-accent-gold">
-        {label}
-      </div>
-      {rows.map((row) => (
-        <TimelineRow
-          key={row.league}
-          row={row}
-          years={years}
-          knownTeams={knownTeams}
-        />
-      ))}
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="group flex w-full cursor-pointer select-none items-center gap-2 border-b border-border bg-bg-base/40 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-accent-gold transition-colors hover:bg-accent-gold/[0.08] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-gold/60"
+      >
+        <span
+          aria-hidden
+          className={`inline-flex h-4 w-4 items-center justify-center rounded-[3px] border border-accent-gold/40 bg-accent-gold/[0.08] text-[10px] leading-none text-accent-gold transition-transform group-hover:bg-accent-gold/[0.18] ${open ? 'rotate-90' : ''}`}
+        >
+          ▸
+        </span>
+        <span>{label}</span>
+        <span className="rounded-full border border-border bg-bg-surface px-1.5 py-0.5 text-[10px] font-medium normal-case text-text-muted">
+          {rows.length}
+        </span>
+        <span className="ml-auto text-[10px] font-medium normal-case tracking-normal text-text-muted/80 group-hover:text-text-muted">
+          {open ? 'click to collapse' : 'click to expand'}
+        </span>
+      </button>
+      {open &&
+        rows.map((row) => (
+          <TimelineRow
+            key={row.league}
+            row={row}
+            years={years}
+            knownTeams={knownTeams}
+          />
+        ))}
     </>
   )
 }
@@ -316,6 +353,7 @@ function splitStripeClass(split: string): string {
     case 'Split 3':
       return 'border-l-fuchsia-400'
     case 'Finals':
+    case 'Regional Finals':
       return 'border-l-accent-gold'
     case '':
       return 'border-l-transparent'
@@ -409,9 +447,7 @@ function CellChip({
           className="h-5 w-5 object-contain"
         />
       ) : (
-        <span className="text-[10px] font-semibold text-text-muted">
-          {chip.team.slice(0, 3).toUpperCase()}
-        </span>
+        <UnknownTeamIcon />
       )}
     </div>
   )
@@ -427,6 +463,23 @@ function CellChip({
     )
   }
   return inner
+}
+
+function UnknownTeamIcon() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      aria-hidden
+      className="h-4 w-4 text-text-muted/70"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+    >
+      <circle cx="8" cy="8" r="6" />
+      <path d="M6 6.5a2 2 0 1 1 3.2 1.6c-.6.4-1.2.8-1.2 1.4" strokeLinecap="round" />
+      <circle cx="8" cy="11.6" r="0.6" fill="currentColor" stroke="none" />
+    </svg>
+  )
 }
 
 const CLASS_PRIORITY: Record<LeagueClassification, number> = {
@@ -499,8 +552,46 @@ function buildRows(
     const pa = CLASS_PRIORITY[a.classification]
     const pb = CLASS_PRIORITY[b.classification]
     if (pa !== pb) return pa - pb
+    if (a.classification === 'International') {
+      const ra = intlLeagueRank(a.league)
+      const rb = intlLeagueRank(b.league)
+      if (ra !== rb) return ra - rb
+    } else {
+      // Domestic / Events: 정식 티어 우선(Primary > Secondary > ...) 후 출전 게임수 많은 순.
+      const la = LEVEL_RANK[a.level] ?? 99
+      const lb = LEVEL_RANK[b.level] ?? 99
+      if (la !== lb) return la - lb
+      if (a.totalGames !== b.totalGames) return b.totalGames - a.totalGames
+    }
     return a.league.localeCompare(b.league)
   })
 
   return { rows, years }
+}
+
+const INTL_LEAGUE_RANK: Record<string, number> = {
+  'World Championship': 0,
+  'Mid-Season Invitational': 1,
+  'First Stand': 2,
+  'Esports World Cup': 3,
+  'Mid-Season Cup 2020': 4,
+  'Rift Rivals': 5,
+  // Asian Games / SEA Games는 prefix-rank로 처리 (아래 함수)
+}
+
+function intlLeagueRank(league: string): number {
+  const exact = INTL_LEAGUE_RANK[league]
+  if (exact !== undefined) return exact
+  if (league.startsWith('Asian Games')) return 6
+  if (league.startsWith('Road to Asian Games')) return 7
+  if (league.startsWith('SEA Games') || league === 'Southeast Asian Games') return 8
+  return 99
+}
+
+const LEVEL_RANK: Record<string, number> = {
+  Primary: 0,
+  Secondary: 1,
+  Tertiary: 2,
+  Developmental: 3,
+  '': 4,
 }

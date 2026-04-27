@@ -36,6 +36,7 @@ export interface LeagueStage {
   IsPlayoffs: boolean
   IsOfficial: boolean
   TournamentLevel: string
+  Classification: LeagueClassification
   Role: string
 }
 
